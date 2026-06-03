@@ -23,7 +23,7 @@ jobs:
     - name: 4. Suntik ReSukiSU Core
       run: |
         cd kernel-source
-        curl -LSs "https://raw.githubusercontent.com/ReSukiSU-GKI/KernelSU/main/kernel/setup.sh" | bash -s main
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
     - name: 5. Download & Terapkan Patch SUSFS (Kernel 5.10)
       run: |
