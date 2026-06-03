@@ -82,21 +82,28 @@ jobs:
       run: |
         echo "=== MENYUNTIKKAN RESUKISU CORE ==="
         cd kernel-source
+        # Menjalankan script installer ReSukiSU
         curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
         
-        # [FIX HARD DETEKSI KERNELSU]
-        # Jika script ReSukiSU tidak membuat Kconfig di drivers/kernelsu, kita buatkan link/direktori secara aman
-        if [ ! -f "drivers/kernelsu/Kconfig" ]; then
-          echo "Memperbaiki struktur folder drivers/kernelsu yang hilang..."
-          mkdir -p drivers/kernelsu
-          if [ -f "KernelSU/drivers/Kconfig" ]; then
-            cp KernelSU/drivers/Kconfig drivers/kernelsu/Kconfig
-            cp KernelSU/drivers/Makefile drivers/kernelsu/Makefile
-          else
-            # Fallback jika nama foldernya berbeda (misal kernelsu-next / suki)
-            echo 'source "KernelSU/drivers/Kconfig"' > drivers/kernelsu/Kconfig
-            echo 'obj-y += KernelSU/drivers/' > drivers/kernelsu/Makefile
-          fi
+        # [FIX HARD KERNELSU STRUCTURE]
+        # Salin secara fisik isi driver KernelSU ke folder drivers/kernelsu agar terdeteksi secara absolut
+        echo "Melakukan penyelarasan fisik folder drivers/kernelsu..."
+        rm -rf drivers/kernelsu
+        mkdir -p drivers/kernelsu
+        
+        if [ -d "KernelSU/drivers" ]; then
+          cp -r KernelSU/drivers/* drivers/kernelsu/
+        elif [ -d "KernelSU" ]; then
+          # Jika strukturnya langsung di root KernelSU
+          cp -r KernelSU/* drivers/kernelsu/ || true
+        fi
+        
+        # Pastikan file Kconfig di drivers/kernelsu tidak kosong dan merujuk ke dirinya sendiri secara lokal
+        if [ -f "drivers/kernelsu/Kconfig" ]; then
+          sed -i 's|source "KernelSU/drivers/Kconfig"||g' drivers/kernelsu/Kconfig || true
+          # Bersihkan referensi rekursif yang bisa bikin loop
+          sed -i 's|KernelSU/drivers/||g' drivers/kernelsu/Kconfig || true
+          sed -i 's|KernelSU/drivers/||g' drivers/kernelsu/Makefile || true
         fi
 
     - name: 5. Konfigurasi Optimasi "Geyming Abis"
