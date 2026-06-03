@@ -96,7 +96,15 @@ jobs:
         echo "Mengubah optimasi kompilator ke -O3..."
         find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-O2/-O3/g' || true
         
-        # 2. Suntik konfigurasi ramah gaming ke defconfig (membuang overhead & debug log)
+        # 2. [FIX HARD -WERROR] Hapus paksa semua bendera -Werror dari seluruh Makefile dan file konfigurasi
+        echo "Menghapus semua bendera -Werror secara menyeluruh..."
+        find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
+        
+        # 3. [FIX HARD STACK WARNING] Ganti limit CONFIG_FRAME_WARN bawaan langsung di dalam defconfig agar tidak ter-overwrite
+        echo "Mengganti konfigurasi limit stack frame bawaan di gki_defconfig..."
+        sed -i 's/CONFIG_FRAME_WARN=2048/CONFIG_FRAME_WARN=4096/g' arch/arm64/configs/gki_defconfig || true
+        
+        # 4. Suntik konfigurasi ramah gaming ke defconfig (membuang overhead & debug log)
         echo "Menambahkan optimasi performa ke gki_defconfig..."
         {
           # Mematikan Debug Info berat demi kecepatan compile & minimalisasi frame drop
@@ -116,7 +124,7 @@ jobs:
           echo "CONFIG_ARM_PMU=y"
           
           # [SOLUSI COMPILER CLANG 19 STACK LIMIT]
-          # Bug Clang 19 diatasi dengan melonggarkan batas stack frame
+          # Bug Clang 19 diatasi dengan melonggarkan batas stack frame global
           echo "CONFIG_FRAME_WARN=4096"
           echo "CONFIG_WERROR=n"
           
