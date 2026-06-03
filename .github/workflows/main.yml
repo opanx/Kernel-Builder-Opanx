@@ -7,129 +7,56 @@ jobs:
   build-kernel:
     runs-on: ubuntu-22.04
     steps:
-    - name: 1. Setup Environment & Pasang Clang 19
+    - name: 1. Setup Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg
-        
-        # Mengunduh dan memasang LLVM/Clang 19 resmi
+        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget
+        # Gunakan LLVM 17 yang paling stabil buat 5.10
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 19 all
-        
-        # [FIX] Hubungkan SEMUA tool LLVM ke /usr/bin agar make bisa mendeteksinya
-        for bin in /usr/lib/llvm-19/bin/*; do
-          sudo ln -sf "$bin" "/usr/bin/$(basename "$bin")"
-        done
-        
-        # Ekspor ke PATH global
-        echo "/usr/lib/llvm-19/bin" >> $GITHUB_PATH
+        sudo ./llvm.sh 17 all
+        echo "/usr/lib/llvm-17/bin" >> $GITHUB_PATH
 
-    - name: 2. Clone Source Kernel (MillenniumOSS 5.10)
+    - name: 2. Clone Kernel & Patch
       run: |
         git clone --depth=1 -b android12-5.10 https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
-
-    - name: 3. Suntik ReSukiSU Core
-      run: |
-        cd kernel-source
-        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
-
-    - name: 4. Download & Terapkan Patch SUSFS (Kernel 5.10)
-      run: |
         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
-        mkdir -p kernel-source/KernelSU/kernel
-        cp susfs-source/KernelSU/kernel/ksu_susfs.h kernel-source/KernelSU/kernel/ || echo "ksu_susfs.h sudah ada"
-        cp -r susfs-source/kernel_patches/fs/* kernel-source/fs/
-        cp -r susfs-source/kernel_patches/include/linux/* kernel-source/include/linux/
-        cp susfs-source/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch kernel-source/
         cd kernel-source
-        SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
-        if [ "$SUBLEVEL" -le "43" ]; then
-          perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
-        fi
-        if [ "$SUBLEVEL" -le "117" ]; then
-          sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c
-          perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c
-          perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
-        fi
-        patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-        if [ "$SUBLEVEL" -le "209" ]; then
-          sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
-        fi
+        cp ../susfs-source/KernelSU/kernel/ksu_susfs.h KernelSU/kernel/
+        cp -r ../susfs-source/kernel_patches/fs/* fs/
+        cp -r ../susfs-source/kernel_patches/include/linux/* include/linux/
+        patch -p1 < ../susfs-source/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
 
-    - name: 5. Suntik Optimasi Gaming "Geyming Abis"
+    - name: 3. Compile Kernel
       run: |
         cd kernel-source
-        find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-O2/-O3/g' || true
+        export PATH=/usr/lib/llvm-17/bin:$PATH
+        # Hapus -Werror agar header install tidak abort karena warning kecil
         find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
-        sed -i 's/CONFIG_FRAME_WARN=2048/CONFIG_FRAME_WARN=4096/g' arch/arm64/configs/gki_defconfig || true
-        {
-          echo "# CONFIG_DEBUG_INFO is not set"
-          echo "CONFIG_DEBUG_INFO_REDUCED=n"
-          echo "CONFIG_SLUB_DEBUG=n"
-          echo "CONFIG_PANIC_ON_OOPS=n"
-          echo "CONFIG_LOCKUP_DETECTOR=n"
-          echo "CONFIG_SCHED_DEBUG=n"
-          echo "CONFIG_PROFILING=y"
-          echo "CONFIG_PERF_EVENTS=y"
-          echo "CONFIG_HW_PERF_EVENTS=y"
-          echo "CONFIG_ARM_PMU=y"
-          echo "CONFIG_FRAME_WARN=4096"
-          echo "CONFIG_WERROR=n"
-          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y"
-          echo "CONFIG_CRYPTO_LZ4=y"
-          echo "CONFIG_CRYPTO_LZ4HC=y"
-          echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
-        } >> arch/arm64/configs/gki_defconfig
-
-    - name: 6. Gas Compile Kernel GKI (Clang 19)
-      run: |
-        cd kernel-source
-        export PATH=/usr/lib/llvm-19/bin:$PATH
-        {
-          echo "CONFIG_KSU_SUSFS=y"
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n"
-          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
-          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
-          echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
-          echo 'CONFIG_LOCALVERSION="-Panxcz-susfs"'
-        } >> arch/arm64/configs/gki_defconfig
+        
+        # PENTING: Gunakan make headers_install secara terpisah agar tidak bentrok
         make O=out ARCH=arm64 gki_defconfig
-        make O=out ARCH=arm64 olddefconfig
-        make -j$(nproc --all) O=out ARCH=arm64 \
-                              CC=clang \
-                              LD=ld.lld \
-                              AR=llvm-ar \
-                              NM=llvm-nm \
-                              OBJCOPY=llvm-objcopy \
-                              OBJDUMP=llvm-objdump \
-                              STRIP=llvm-strip \
-                              CROSS_COMPILE=aarch64-linux-gnu- \
-                              CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-                              LLVM=1 \
-                              LLVM_IAS=1
+        make O=out ARCH=arm64 headers_install
+        
+        # Kompilasi inti dengan HOSTCC gcc dan flag disable error
+        make -j$(nproc) O=out ARCH=arm64 \
+          HOSTCC=gcc HOSTCXX=g++ \
+          CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+          CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          LLVM=1 LLVM_IAS=1
 
-    - name: 7. Packing ke .Zip Anti-Bootloop (AnyKernel3)
+    - name: 4. Packing
       run: |
         git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
-        if [ -f kernel-source/out/arch/arm64/boot/Image ]; then
-          cp kernel-source/out/arch/arm64/boot/Image AK3/
-        else
-          echo "Error: Image tidak ditemukan!" && exit 1
-        fi
+        cp kernel-source/out/arch/arm64/boot/Image AK3/
         cd AK3
-        sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;|block=auto;|g' anykernel.sh
-        sed -i 's|is_slot_device=0;|is_slot_device=auto;|g' anykernel.sh
+        echo 'block=auto;' >> anykernel.sh
+        echo 'is_slot_device=auto;' >> anykernel.sh
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
         zip -r9 ../Panxcz_kernel_susfs.zip *
 
-    - name: 8. Ambil File .Zip Jadi
+    - name: 5. Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel-Zip-Gaming-Flashable
+        name: Panxcz_kernel_susfs
         path: Panxcz_kernel_susfs.zip
