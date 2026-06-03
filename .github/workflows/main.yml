@@ -58,7 +58,7 @@ jobs:
         cp -r susfs-source/kernel_patches/include/linux/* kernel-source/include/linux/
         cp susfs-source/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch kernel-source/
 
-        # 3. Masuk ke source kernel untuk eksekusi modifikasi fake patches & patch utama
+        # 3. Masuk to source kernel untuk eksekusi modifikasi fake patches & patch utama
         cd kernel-source
 
         # Mengekstrak sublevel kernel secara otomatis dari Makefile
@@ -98,25 +98,31 @@ jobs:
         # 2. Suntik konfigurasi ramah gaming ke defconfig (membuang overhead & debug log)
         echo "Menambahkan optimasi performa ke gki_defconfig..."
         {
-          # Mematikan Debugging untuk performa maksimal dan meminimalkan delay frame
-          echo "CONFIG_DEBUG_INFO=n"
+          # Mematikan Debug Info berat demi kecepatan compile & minimalisasi frame drop
           echo "# CONFIG_DEBUG_INFO is not set"
-          echo "CONFIG_DEBUG_KERNEL=n"
+          echo "CONFIG_DEBUG_INFO_REDUCED=n"
+          
+          # Mematikan overhead debugging runtime untuk respon maksimal
           echo "CONFIG_SLUB_DEBUG=n"
           echo "CONFIG_PANIC_ON_OOPS=n"
           echo "CONFIG_LOCKUP_DETECTOR=n"
           echo "CONFIG_SCHED_DEBUG=n"
-          echo "CONFIG_DEBUG_MISC=n"
           
-          # [SOLUSI ERROR] Profiling wajib aktif agar fungsi perf_num_counters() di perf.c terdefinisi
+          # [SOLUSI ERROR] Wajib aktif untuk PMU & Perf Counters agar tidak terjadi error implicit function di perf.c
           echo "CONFIG_PROFILING=y"
           echo "CONFIG_PERF_EVENTS=y"
+          echo "CONFIG_HW_PERF_EVENTS=y"
+          echo "CONFIG_ARM_PMU=y"
+          
+          # [SOLUSI COMPILER CLANG 19 STACK LIMIT]
+          # Bug Clang 19 diatasi dengan melonggarkan batas stack frame
+          echo "CONFIG_FRAME_WARN=4096"
+          echo "CONFIG_WERROR=n"
           
           # Mengoptimalkan performa compiler
           echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y"
-          echo "# CONFIG_CC_OPTIMIZE_FOR_SIZE is not set"
           
-          # Mengaktifkan kompresi memori super cepat untuk kestabilan multitasking saat game berat
+          # Mengaktifkan kompresi memori LZ4 super cepat untuk RAM management terbaik saat gaming berat
           echo "CONFIG_CRYPTO_LZ4=y"
           echo "CONFIG_CRYPTO_LZ4HC=y"
           echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
@@ -129,22 +135,30 @@ jobs:
         # Prioritaskan folder bin LLVM 19 di dalam environment PATH kompilasi
         export PATH=/usr/lib/llvm-19/bin:$PATH
         
-        # Tambahkan konfigurasi SUSFS ke gki_defconfig agar aktif saat kompilasi
+        # Tambahkan konfigurasi SUSFS dan identitas nama kernel baru ke gki_defconfig
         {
           echo "CONFIG_KSU_SUSFS=y"
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
           echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
           echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
           echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" # Di-disable untuk mengurangi spam log saat main game
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n"
           echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
           echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
           echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
+          
+          # Mengubah nama lokal versi kernel GKI agar teridentifikasi sebagai Panxcz-susfs
+          echo 'CONFIG_LOCALVERSION="-Panxcz-susfs"'
         } >> arch/arm64/configs/gki_defconfig
 
-        # Memulai konfigurasi and kompilasi menggunakan Clang 19 & LLVM Toolchain penuh
+        # 1. Menyiapkan konfigurasi dasar dari gki_defconfig
         make O=out ARCH=arm64 gki_defconfig
+        
+        # 2. Otomatis selesaikan opsi konfigurasi baru secara default tanpa macet
+        make O=out ARCH=arm64 olddefconfig
+
+        # 3. Memulai kompilasi menggunakan Clang 19 & LLVM Toolchain penuh
         make -j$(nproc --all) O=out ARCH=arm64 \
                               CC=clang \
                               LD=ld.lld \
@@ -176,11 +190,11 @@ jobs:
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
         sed -i 's/block=\/dev\/block\/by-name\/boot;/block=auto;/g' anykernel.sh
         
-        # Bungkus jadi file .zip flashable
-        zip -r9 ../Kernel_ReSukiSU_SUSFS_Gaming_Opanx.zip *
+        # Bungkus jadi file .zip flashable dengan nama baru
+        zip -r9 ../Panxcz_kernel_susfs.zip *
 
     - name: 8. Ambil File .Zip Jadi
       uses: actions/upload-artifact@v4
       with:
         name: Kernel-Zip-Gaming-Flashable
-        path: Kernel_ReSukiSU_SUSFS_Gaming_Opanx.zip
+        path: Panxcz_kernel_susfs.zip
