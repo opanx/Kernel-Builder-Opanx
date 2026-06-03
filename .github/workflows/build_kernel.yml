@@ -1,0 +1,69 @@
+name: Build Kernel GKI - ReSukiSU + SUSFS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: 1. Setup Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip realpath
+
+    - name: 2. Download Compiler (Proton Clang)
+      run: |
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+
+    - name: 3. Clone Source Kernel (MillenniumOSS 5.10)
+      run: |
+        git clone --depth=1 -b android12-5.10 https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
+
+    - name: 4. Suntik ReSukiSU Core
+      run: |
+        cd kernel-source
+        curl -LSs "https://raw.githubusercontent.com/ReSukiSU-GKI/KernelSU/main/kernel/setup.sh" | bash -s main
+
+    - name: 5. Download & Terapkan Patch SUSFS (Kernel 5.10)
+      run: |
+        git clone https://github.com/ReSukiSU-GKI/GKI_KernelSU_SUSFS.git susfs-source
+        cd kernel-source
+        cp ../susfs-source/KernelSU/kernel/ksu_susfs.h kernel/
+        echo "Mengaplikasikan patch SUSFS v5.10..."
+        cp ../susfs-source/5.10/* ./
+        git apply --allow-empty *.patch || true
+
+    - name: 6. Gas Compile Kernel GKI!
+      run: |
+        cd kernel-source
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+        make O=out ARCH=arm64 gki_defconfig
+        make -j$(nproc --all) O=out ARCH=arm64 \
+                              CC=clang \
+                              CROSS_COMPILE=aarch64-linux-gnu- \
+                              CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+                              LLVM=1 \
+                              LLVM_IAS=1
+
+    - name: 7. Packing ke .Zip Anti-Bootloop (AnyKernel3)
+      run: |
+        # Download template flasher AnyKernel3 resmi khusus GKI
+        git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
+        
+        # Salin file Image hasil compile ke folder zip AnyKernel3
+        cp kernel-source/out/arch/arm64/boot/Image AK3/
+        
+        # Masuk dan sesuaikan konfigurasi dasar AnyKernel
+        cd AK3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+        sed -i 's/block=\/dev\/block\/by-name\/boot;/block=auto;/g' anykernel.sh
+        
+        # Bungkus jadi file .zip flashable
+        zip -r9 ../Kernel_ReSukiSU_SUSFS_Opanx.zip *
+
+    - name: 8. Ambil File .Zip Jadi
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-Zip-Flashable
+        path: Kernel_ReSukiSU_SUSFS_Opanx.zip
