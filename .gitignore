@@ -1,4 +1,1 @@
-```yaml
-# GitHub workflow artifacts
-.github/workflows/main.yml
-```
+Nothing needs to be added to the .gitignore file based on the provided changes. The added file `test_build.sh` is a shell script and should typically be version controlled as a source file.
