@@ -7,23 +7,34 @@ jobs:
   build-kernel:
     runs-on: ubuntu-22.04
     steps:
-    - name: 1. Setup Environment & Pasang Clang 19
+    - name: 1. Setup Environment & Pasang Clang 19 (FIXED)
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg
+        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
         
-        # Mengunduh dan memasang LLVM/Clang 19 resmi
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 19 all
+        # Tambahkan repositori LLVM resmi
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
         
-        # [FIX] Hubungkan SEMUA tool LLVM ke /usr/bin agar make bisa mendeteksinya
-        for bin in /usr/lib/llvm-19/bin/*; do
-          sudo ln -sf "$bin" "/usr/bin/$(basename "$bin")"
-        done
+        # Update dan install Clang 19 dengan semua tools
+        sudo apt-get update
+        sudo apt-get install -y clang-19 lld-19 llvm-19 llvm-19-dev llvm-19-runtime
         
-        # Ekspor ke PATH global
-        echo "/usr/lib/llvm-19/bin" >> $GITHUB_PATH
+        # Buat symlink untuk semua tool LLVM ke /usr/bin
+        sudo ln -sf /usr/bin/clang-19 /usr/bin/clang
+        sudo ln -sf /usr/bin/ld.lld-19 /usr/bin/ld.lld
+        sudo ln -sf /usr/bin/llvm-ar-19 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-nm-19 /usr/bin/llvm-nm
+        sudo ln -sf /usr/bin/llvm-objcopy-19 /usr/bin/llvm-objcopy
+        sudo ln -sf /usr/bin/llvm-objdump-19 /usr/bin/llvm-objdump
+        sudo ln -sf /usr/bin/llvm-strip-19 /usr/bin/llvm-strip
+        sudo ln -sf /usr/bin/llvm-readelf-19 /usr/bin/llvm-readelf
+        
+        # Tambahkan ke PATH
+        echo "/usr/bin" >> $GITHUB_PATH
+        echo "Clang 19 installed successfully!"
+        clang --version
+        ld.lld --version
 
     - name: 2. Clone Source Kernel (MillenniumOSS 5.10)
       run: |
@@ -45,7 +56,7 @@ jobs:
         cd kernel-source
         SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
         if [ "$SUBLEVEL" -le "43" ]; then
-          perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
+          perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*$\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
         fi
         if [ "$SUBLEVEL" -le "117" ]; then
           sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c
@@ -82,10 +93,16 @@ jobs:
           echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
         } >> arch/arm64/configs/gki_defconfig
 
-    - name: 6. Gas Compile Kernel GKI (Clang 19)
+    - name: 6. Gas Compile Kernel GKI (Clang 19) - FIXED
       run: |
         cd kernel-source
-        export PATH=/usr/lib/llvm-19/bin:$PATH
+        
+        # Set environment variables dengan benar
+        export PATH=/usr/bin:$PATH
+        export LLVM=1
+        export LLVM_IAS=1
+        
+        # Tambahkan konfigurasi SUSFS
         {
           echo "CONFIG_KSU_SUSFS=y"
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
@@ -99,6 +116,8 @@ jobs:
           echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
           echo 'CONFIG_LOCALVERSION="-Panxcz-susfs"'
         } >> arch/arm64/configs/gki_defconfig
+        
+        # Build dengan verbose untuk debugging
         make O=out ARCH=arm64 gki_defconfig
         make O=out ARCH=arm64 olddefconfig
         make -j$(nproc --all) O=out ARCH=arm64 \
@@ -110,9 +129,7 @@ jobs:
                               OBJDUMP=llvm-objdump \
                               STRIP=llvm-strip \
                               CROSS_COMPILE=aarch64-linux-gnu- \
-                              CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-                              LLVM=1 \
-                              LLVM_IAS=1
+                              CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
     - name: 7. Packing ke .Zip Anti-Bootloop (AnyKernel3)
       run: |
