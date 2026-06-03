@@ -36,6 +36,7 @@ jobs:
 
     - name: 2. Clone Source Kernel (MillenniumOSS 5.10)
       run: |
+        # Mengklon source kernel GKI 5.10 versi LTS terbaru
         git clone --depth=1 -b android12-5.10 https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
 
     - name: 3. Suntik ReSukiSU Core
@@ -187,8 +188,15 @@ jobs:
         
         # Masuk dan sesuaikan konfigurasi dasar AnyKernel
         cd AK3
+        
+        # [SOLUSI FLASH FAILED] Ganti block placeholder AnyKernel3 bawaan secara tepat dengan auto-detect
+        sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;|block=auto;|g' anykernel.sh
+        
+        # [SOLUSI SLOT DEVICE] Aktifkan auto-detection slot A/B untuk HP GKI modern
+        sed -i 's|is_slot_device=0;|is_slot_device=auto;|g' anykernel.sh
+        
+        # Matikan pengecekan device agar bisa di-flash secara universal di perangkat GKI lu
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-        sed -i 's/block=\/dev\/block\/by-name\/boot;/block=auto;/g' anykernel.sh
         
         # Bungkus jadi file .zip flashable dengan nama baru
         zip -r9 ../Panxcz_kernel_susfs.zip *
