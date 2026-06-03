@@ -83,16 +83,28 @@ jobs:
         echo "=== MENYUNTIKKAN RESUKISU CORE ==="
         cd kernel-source
         curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+        
+        # [FIX HARD DETEKSI KERNELSU]
+        # Jika script ReSukiSU tidak membuat Kconfig di drivers/kernelsu, kita buatkan link/direktori secara aman
+        if [ ! -f "drivers/kernelsu/Kconfig" ]; then
+          echo "Memperbaiki struktur folder drivers/kernelsu yang hilang..."
+          mkdir -p drivers/kernelsu
+          if [ -f "KernelSU/drivers/Kconfig" ]; then
+            cp KernelSU/drivers/Kconfig drivers/kernelsu/Kconfig
+            cp KernelSU/drivers/Makefile drivers/kernelsu/Makefile
+          else
+            # Fallback jika nama foldernya berbeda (misal kernelsu-next / suki)
+            echo 'source "KernelSU/drivers/Kconfig"' > drivers/kernelsu/Kconfig
+            echo 'obj-y += KernelSU/drivers/' > drivers/kernelsu/Makefile
+          fi
+        fi
 
     - name: 5. Konfigurasi Optimasi "Geyming Abis"
       run: |
         echo "=== SUNTIK OPTIMASI GAME & PERFORMA ==="
         cd kernel-source
         
-        # Menaikkan optimasi compiler dari tingkat -O2 ke -O3 secara agresif
-        find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-O2/-O3/g' || true
-        
-        # Membersihkan bendera penanganan warning ketat (-Werror) yang sering bikin build macet
+        # Driver-level -Werror stripping
         find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
         
         # Mengubah batas maksimum stack frame agar ramah optimasi inlining Clang 19
