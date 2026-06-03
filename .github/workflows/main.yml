@@ -1,4 +1,5 @@
-name: Build Kernel GKI - ReSukiSU + SUSFS
+```yaml
+name: Build Kernel GKI - ReSukiSU + SUSFS (Gaming Edition)
 
 on:
   workflow_dispatch:
@@ -7,40 +8,139 @@ jobs:
   build-kernel:
     runs-on: ubuntu-22.04
     steps:
-    - name: 1. Setup Environment
+    - name: 1. Setup Environment & Pasang Clang 19
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip
+        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg
+        
+        # Mengunduh dan memasang LLVM/Clang 19 resmi dari apt.llvm.org
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 19 all
+        
+        # Membuat tautan simbolis agar LLVM=1 mendeteksi Clang 19 secara bawaan
+        sudo ln -sf /usr/bin/clang-19 /usr/bin/clang
+        sudo ln -sf /usr/bin/ld.lld-19 /usr/bin/ld.lld
+        sudo ln -sf /usr/bin/llvm-objcopy-19 /usr/bin/llvm-objcopy
+        sudo ln -sf /usr/bin/llvm-ar-19 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-strip-19 /usr/bin/llvm-strip
+        
+        # Verifikasi versi clang yang terpasang
+        clang --version
 
-    - name: 2. Download Compiler (Proton Clang)
-      run: |
-        git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
-
-    - name: 3. Clone Source Kernel (MillenniumOSS 5.10)
+    - name: 2. Clone Source Kernel (MillenniumOSS 5.10)
       run: |
         git clone --depth=1 -b android12-5.10 https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
 
-    - name: 4. Suntik ReSukiSU Core
+    - name: 3. Suntik ReSukiSU Core
       run: |
         cd kernel-source
+        # Menggunakan script setup dari SukiSU-Ultra sebagai fallback ReSukiSU yang stabil
         curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-    - name: 5. Download & Terapkan Patch SUSFS (Kernel 5.10)
+    - name: 4. Download & Terapkan Patch SUSFS (Kernel 5.10)
       run: |
-        git clone https://github.com/ReSukiSU-GKI/GKI_KernelSU_SUSFS.git susfs-source
-        cd kernel-source
-        cp ../susfs-source/KernelSU/kernel/ksu_susfs.h kernel/
-        echo "Mengaplikasikan patch SUSFS v5.10..."
-        cp ../susfs-source/5.10/* ./
-        git apply --allow-empty *.patch || true
+        # Mengklon repository SUSFS resmi/stabil untuk GKI 5.10
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
+        
+        # 1. Salin file header ksu_susfs.h ke KernelSU
+        mkdir -p kernel-source/KernelSU/kernel
+        cp susfs-source/KernelSU/kernel/ksu_susfs.h kernel-source/KernelSU/kernel/ || echo "ksu_susfs.h sudah ada atau dilewati"
 
-    - name: 6. Gas Compile Kernel GKI!
+        # 2. Salin patch mentah (raw files) SUSFS ke source kernel
+        cp -r susfs-source/kernel_patches/fs/* kernel-source/fs/
+        cp -r susfs-source/kernel_patches/include/linux/* kernel-source/include/linux/
+        cp susfs-source/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch kernel-source/
+
+        # 3. Masuk ke source kernel untuk eksekusi modifikasi fake patches & patch utama
+        cd kernel-source
+
+        # Mengekstrak sublevel kernel secara otomatis dari Makefile
+        SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
+        echo "Sublevel kernel terdeteksi: $SUBLEVEL"
+
+        # [Fake Patches dari WildKernels] Mencegah konflik patch SUSFS pada versi kernel lama
+        if [ "$SUBLEVEL" -le "43" ]; then
+          echo "Menerapkan Fake Patch base.c..."
+          perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
+        fi
+        if [ "$SUBLEVEL" -le "117" ]; then
+          echo "Menerapkan Fake Patch fdinfo.c..."
+          sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c
+          perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c
+          perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
+        fi
+
+        # 4. Terapkan Patch Utama SUSFS 5.10
+        echo "Mengaplikasikan patch SUSFS v5.10..."
+        patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+
+        # 5. Terapkan perbaikan show_pad jika sublevel di bawah atau sama dengan 209
+        if [ "$SUBLEVEL" -le "209" ]; then
+          echo "Menerapkan perbaikan show_pad di task_mmu.c..."
+          sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+        fi
+
+    - name: 5. Suntik Optimasi Gaming "Geyming Abis"
       run: |
         cd kernel-source
-        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+        
+        # 1. Mengubah optimasi compiler dari -O2 menjadi -O3 secara agresif untuk kecepatan eksekusi tinggi
+        echo "Mengubah optimasi kompilator ke -O3..."
+        find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-O2/-O3/g' || true
+        
+        # 2. Suntik konfigurasi ramah gaming ke defconfig (membuang overhead & debug log)
+        echo "Menambahkan optimasi performa ke gki_defconfig..."
+        {
+          # Mematikan Debugging untuk performa maksimal dan meminimalkan delay frame
+          echo "CONFIG_DEBUG_INFO=n"
+          echo "# CONFIG_DEBUG_INFO is not set"
+          echo "CONFIG_DEBUG_KERNEL=n"
+          echo "CONFIG_SLUB_DEBUG=n"
+          echo "CONFIG_PANIC_ON_OOPS=n"
+          echo "CONFIG_PROFILING=n"
+          echo "CONFIG_LOCKUP_DETECTOR=n"
+          echo "CONFIG_SCHED_DEBUG=n"
+          echo "CONFIG_DEBUG_MISC=n"
+          
+          # Mengoptimalkan performa compiler
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y"
+          echo "# CONFIG_CC_OPTIMIZE_FOR_SIZE is not set"
+          
+          # Mengaktifkan kompresi memori super cepat untuk kestabilan multitasking saat game berat
+          echo "CONFIG_CRYPTO_LZ4=y"
+          echo "CONFIG_CRYPTO_LZ4HC=y"
+          echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
+        } >> arch/arm64/configs/gki_defconfig
+
+    - name: 6. Gas Compile Kernel GKI (Clang 19)
+      run: |
+        cd kernel-source
+        
+        # Tambahkan konfigurasi SUSFS ke gki_defconfig agar aktif saat kompilasi
+        {
+          echo "CONFIG_KSU_SUSFS=y"
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n" # Di-disable untuk mengurangi spam log saat main game
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
+          echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
+        } >> arch/arm64/configs/gki_defconfig
+
+        # Memulai konfigurasi dan kompilasi menggunakan Clang 19 & LLVM Toolchain penuh
         make O=out ARCH=arm64 gki_defconfig
         make -j$(nproc --all) O=out ARCH=arm64 \
                               CC=clang \
+                              LD=ld.lld \
+                              AR=llvm-ar \
+                              NM=llvm-nm \
+                              OBJCOPY=llvm-objcopy \
+                              OBJDUMP=llvm-objdump \
+                              STRIP=llvm-strip \
                               CROSS_COMPILE=aarch64-linux-gnu- \
                               CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
                               LLVM=1 \
@@ -51,8 +151,13 @@ jobs:
         # Download template flasher AnyKernel3 resmi khusus GKI
         git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
         
-        # Salin file Image hasil compile ke folder zip AnyKernel3
-        cp kernel-source/out/arch/arm64/boot/Image AK3/
+        # Pastikan folder output kompilasi ada dan salin file Image
+        if [ -f kernel-source/out/arch/arm64/boot/Image ]; then
+          cp kernel-source/out/arch/arm64/boot/Image AK3/
+          echo "Berhasil menyalin Image GKI hasil kompilasi Clang 19!"
+        else
+          echo "Error: Berkas Image tidak ditemukan di out/arch/arm64/boot/Image!" && exit 1
+        fi
         
         # Masuk dan sesuaikan konfigurasi dasar AnyKernel
         cd AK3
@@ -60,10 +165,12 @@ jobs:
         sed -i 's/block=\/dev\/block\/by-name\/boot;/block=auto;/g' anykernel.sh
         
         # Bungkus jadi file .zip flashable
-        zip -r9 ../Kernel_ReSukiSU_SUSFS_Opanx.zip *
+        zip -r9 ../Kernel_ReSukiSU_SUSFS_Gaming_Opanx.zip *
 
     - name: 8. Ambil File .Zip Jadi
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel-Zip-Flashable
-        path: Kernel_ReSukiSU_SUSFS_Opanx.zip
+        name: Kernel-Zip-Gaming-Flashable
+        path: Kernel_ReSukiSU_SUSFS_Gaming_Opanx.zip
+
+```
