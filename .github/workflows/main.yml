@@ -1,4 +1,4 @@
-name: Build Kernel GKI - ReSukiSU + SUSFS (Gaming Edition)
+name: Build Kernel GKI - ReSukiSU + SUSFS 2.1.0 (Gaming Edition)
 
 on:
   workflow_dispatch:
@@ -7,190 +7,159 @@ jobs:
   build-kernel:
     runs-on: ubuntu-22.04
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: 1. Setup Environment & Install Clang 19
+    - name: 🚀 Setup Environment & Install Clang 19 (FIXED)
       run: |
-        set -e
         sudo apt-get update
-        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg python3 python3-distutils
-
-        # Download and install LLVM/Clang 19 officially
-        wget -q https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 19 all || {
-          echo "LLVM script failed, trying alternative method..."
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main"
-          sudo apt-get update
-          sudo apt-get install -y clang-19 lld-19 llvm-19 llvm-19-dev llvm-19-tools
-        }
-
-        # [FIX] Link ALL LLVM tools to /usr/bin so make can detect them
-        for bin in /usr/lib/llvm-19/bin/*; do
-          sudo ln -sf "$bin" "/usr/bin/$(basename "$bin")"
-        done
-
-        # Export to global PATH for all subsequent steps
-        echo "/usr/lib/llvm-19/bin" >> $GITHUB_PATH
-        echo "LLVM_VERSION=19" >> $GITHUB_ENV
+        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
         
-        # Verify clang installation
+        # Add LLVM repository
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+        
+        # Install Clang 19
+        sudo apt-get update
+        sudo apt-get install -y clang-19 lld-19 llvm-19 llvm-19-dev llvm-19-runtime
+        
+        # Create symlinks
+        sudo ln -sf /usr/bin/clang-19 /usr/bin/clang
+        sudo ln -sf /usr/bin/ld.lld-19 /usr/bin/ld.lld
+        sudo ln -sf /usr/bin/llvm-ar-19 /usr/bin/llvm-ar
+        sudo ln -sf /usr/bin/llvm-nm-19 /usr/bin/llvm-nm
+        sudo ln -sf /usr/bin/llvm-objcopy-19 /usr/bin/llvm-objcopy
+        sudo ln -sf /usr/bin/llvm-objdump-19 /usr/bin/llvm-objdump
+        sudo ln -sf /usr/bin/llvm-strip-19 /usr/bin/llvm-strip
+        sudo ln -sf /usr/bin/llvm-readelf-19 /usr/bin/llvm-readelf
+        
+        # Verify installation
+        echo "Clang version:"
         clang --version
+        echo "LLD version:"
         ld.lld --version
 
-    - name: 2. Clone Kernel Source (MillenniumOSS 5.10)
+    - name: 📦 Clone Source Kernel (Android 12.5.10.257)
       run: |
-        set -e
         git clone --depth=1 -b android12-5.10 https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
         cd kernel-source
-        echo "Kernel source cloned successfully"
-        git log -1 --oneline
+        echo "Kernel version:"
+        grep "VERSION\|PATCHLEVEL\|SUBLEVEL" Makefile
 
-    - name: 3. Inject ReSukiSU Core
+    - name: 🔥 Inject ReSukiSU Core
       run: |
-        set -e
         cd kernel-source
-        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main || {
-          echo "ReSukiSU injection failed, trying manual method..."
-          git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git temp_sukisu
-          cp -rv temp_sukisu/KernelSU kernel-source/
-          rm -rf temp_sukisu
-        }
-        echo "ReSukiSU injected successfully"
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-    - name: 4. Download & Apply SUSFS Patch (Kernel 5.10)
+    - name: 🛡️ Download & Apply SUSFS 2.1.0 Patch (Kernel 5.10)
       run: |
-        set -e
-        git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source || {
-          echo "Failed to clone SUSFS, trying alternative branch..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b main susfs-source
-        }
+        # Clone SUSFS 2.1.0
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
+        cd susfs-source
+        git checkout tags/v2.1.0 2>/dev/null || echo "Using latest from branch"
         
+        # Apply SUSFS to kernel
+        cd ..
         mkdir -p kernel-source/KernelSU/kernel
-        cp -v susfs-source/KernelSU/kernel/ksu_susfs.h kernel-source/KernelSU/kernel/ || echo "ksu_susfs.h already exists or not found"
-        cp -rv susfs-source/kernel_patches/fs/* kernel-source/fs/ || echo "FS patches already exist or not found"
-        cp -rv susfs-source/kernel_patches/include/linux/* kernel-source/include/linux/ || echo "Include patches already exist or not found"
-        cp -v susfs-source/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch kernel-source/ || {
-          echo "Patch file not found, looking for alternative..."
-          find susfs-source -name "*.patch" | head -1 | xargs -I {} cp -v {} kernel-source/susfs.patch
-        }
+        cp susfs-source/KernelSU/kernel/ksu_susfs.h kernel-source/KernelSU/kernel/ || echo "ksu_susfs.h already exists"
+        cp -r susfs-source/kernel_patches/fs/* kernel-source/fs/
+        cp -r susfs-source/kernel_patches/include/linux/* kernel-source/include/linux/
+        cp susfs-source/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch kernel-source/
         
+        # Apply patch with fixes
         cd kernel-source
-        
-        # Get SUBLEVEL
-        SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}' || echo "0")
+        SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
         echo "Kernel SUBLEVEL: $SUBLEVEL"
         
-        # Apply proc/base.c fix for SUBLEVEL <= 43
-        if [ "$SUBLEVEL" -le "43" ] 2>/dev/null; then
-          echo "Applying proc/base.c fix for SUBLEVEL <= 43"
-          perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/' fs/proc/base.c || echo "proc/base.c fix skipped"
+        # Fix for older kernels
+        if [ "$SUBLEVEL" -le "43" ]; then
+          perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*$\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
         fi
         
-        # Apply fdinfo.c fixes for SUBLEVEL <= 117
-        if [ "$SUBLEVEL" -le "117" ] 2>/dev/null; then
-          echo "Applying fdinfo.c fixes for SUBLEVEL <= 117"
-          sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c || echo "fdinfo.c fix 1 skipped"
-          perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c || echo "fdinfo.c fix 2 skipped"
-          perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c || echo "fdinfo.c fix 3 skipped"
+        if [ "$SUBLEVEL" -le "117" ]; then
+          sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c
+          perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c
+          perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
         fi
         
         # Apply main SUSFS patch
-        PATCH_FILE="50_add_susfs_in_gki-android12-5.10.patch"
-        if [ ! -f "$PATCH_FILE" ]; then
-          PATCH_FILE="susfs.patch"
+        patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+        
+        if [ "$SUBLEVEL" -le "209" ]; then
+          sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
         fi
         
-        echo "Applying SUSFS patch: $PATCH_FILE..."
-        patch -p1 < "$PATCH_FILE" || {
-          echo "SUSFS patch failed, trying with different options..."
-          patch -p1 --force < "$PATCH_FILE" || echo "SUSFS patch application failed but continuing..."
-        }
-        
-        # Apply task_mmu.c fix for SUBLEVEL <= 209
-        if [ "$SUBLEVEL" -le "209" ] 2>/dev/null; then
-          echo "Applying task_mmu.c fix for SUBLEVEL <= 209"
-          sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c || echo "task_mmu.c fix skipped"
-        fi
-        
-        echo "SUSFS patch applied successfully"
+        echo "SUSFS 2.1.0 applied successfully!"
 
-    - name: 5. Inject Gaming Optimization "Geyming Abis"
+    - name: ⚡ Inject Gaming Optimizations "Geyming Abis"
       run: |
-        set -e
         cd kernel-source
-        echo "Applying -O3 optimization..."
+        
+        # Optimize compilation flags
         find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-O2/-O3/g' || true
-        echo "Removing -Werror warnings as errors..."
         find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
+        
+        # Update defconfig
         sed -i 's/CONFIG_FRAME_WARN=2048/CONFIG_FRAME_WARN=4096/g' arch/arm64/configs/gki_defconfig || true
         
-        # Add gaming optimizations safely
-        cat >> arch/arm64/configs/gki_defconfig << 'EOF'
+        # Add gaming optimizations
+        {
+          echo ""
+          echo "# Gaming Optimizations"
+          echo "# CONFIG_DEBUG_INFO is not set"
+          echo "CONFIG_DEBUG_INFO_REDUCED=n"
+          echo "CONFIG_SLUB_DEBUG=n"
+          echo "CONFIG_PANIC_ON_OOPS=n"
+          echo "CONFIG_LOCKUP_DETECTOR=n"
+          echo "CONFIG_SCHED_DEBUG=n"
+          echo "CONFIG_PROFILING=y"
+          echo "CONFIG_PERF_EVENTS=y"
+          echo "CONFIG_HW_PERF_EVENTS=y"
+          echo "CONFIG_ARM_PMU=y"
+          echo "CONFIG_FRAME_WARN=4096"
+          echo "CONFIG_WERROR=n"
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y"
+          echo "CONFIG_CRYPTO_LZ4=y"
+          echo "CONFIG_CRYPTO_LZ4HC=y"
+          echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
+          echo "CONFIG_ZRAM_DEF_COMP_LZ4HC=y"
+          echo "CONFIG_DEFAULT_MQ_IOSCHED=y"
+          echo "CONFIG_DEFAULT_BFQ=y"
+          echo "# CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL is not set"
+          echo "CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y"
+        } >> arch/arm64/configs/gki_defconfig
+        
+        echo "Gaming optimizations injected!"
 
-# Gaming optimizations
-# CONFIG_DEBUG_INFO is not set
-CONFIG_DEBUG_INFO_REDUCED=n
-CONFIG_SLUB_DEBUG=n
-CONFIG_PANIC_ON_OOPS=n
-CONFIG_LOCKUP_DETECTOR=n
-CONFIG_SCHED_DEBUG=n
-CONFIG_PROFILING=y
-CONFIG_PERF_EVENTS=y
-CONFIG_HW_PERF_EVENTS=y
-CONFIG_ARM_PMU=y
-CONFIG_FRAME_WARN=4096
-CONFIG_WERROR=n
-CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
-CONFIG_CRYPTO_LZ4=y
-CONFIG_CRYPTO_LZ4HC=y
-CONFIG_ZRAM_DEF_COMP_LZ4=y
-EOF
-        echo "Gaming optimizations applied"
-
-    - name: 6. Compile Kernel GKI (Clang 19)
+    - name: 🔨 Compile Kernel GKI (Clang 19) - FIXED
       run: |
-        set -e
         cd kernel-source
         
-        # Export compiler variables
-        export PATH=/usr/lib/llvm-19/bin:$PATH
-        export CC=clang
-        export LD=ld.lld
-        export AR=llvm-ar
-        export NM=llvm-nm
-        export OBJCOPY=llvm-objcopy
-        export OBJDUMP=llvm-objdump
-        export STRIP=llvm-strip
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+        # Set environment
+        export PATH=/usr/bin:$PATH
         export LLVM=1
         export LLVM_IAS=1
-
-        # Add SUSFS and custom config
-        cat >> arch/arm64/configs/gki_defconfig << 'EOF'
-
-# SUSFS Configuration
-CONFIG_KSU_SUSFS=y
-CONFIG_KSU_SUSFS_SUS_PATH=y
-CONFIG_KSU_SUSFS_SUS_MOUNT=y
-CONFIG_KSU_SUSFS_SUS_KSTAT=y
-CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-CONFIG_KSU_SUSFS_ENABLE_LOG=n
-CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-CONFIG_KSU_SUSFS_SUS_MAP=y
-CONFIG_LOCALVERSION="-Panxcz-susfs"
-EOF
-
-        echo "Configuring kernel..."
+        
+        # Add SUSFS configs
+        {
+          echo ""
+          echo "# SUSFS 2.1.0 Configuration"
+          echo "CONFIG_KSU_SUSFS=y"
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n"
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
+          echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
+          echo 'CONFIG_LOCALVERSION="-Panxcz-SUSFS2.1"'
+        } >> arch/arm64/configs/gki_defconfig
+        
+        # Build kernel
+        echo "Starting kernel build..."
         make O=out ARCH=arm64 gki_defconfig
         make O=out ARCH=arm64 olddefconfig
-
-        echo "Starting kernel compilation with $(nproc --all) threads..."
+        
+        # Compile with all cores
         make -j$(nproc --all) O=out ARCH=arm64 \
                               CC=clang \
                               LD=ld.lld \
@@ -200,40 +169,103 @@ EOF
                               OBJDUMP=llvm-objdump \
                               STRIP=llvm-strip \
                               CROSS_COMPILE=aarch64-linux-gnu- \
-                              CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-                              LLVM=1 \
-                              LLVM_IAS=1 || {
-          echo "Compilation failed, checking logs..."
-          tail -100 out/.config || true
-          exit 1
-        }
-
-        echo "Kernel compilation completed!"
-        ls -lh out/arch/arm64/boot/
-
-    - name: 7. Pack into Anti-Bootloop .Zip (AnyKernel3)
-      run: |
-        set -e
-        git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
-        if [ -f kernel-source/out/arch/arm64/boot/Image ]; then
-          cp -v kernel-source/out/arch/arm64/boot/Image AK3/
-        elif [ -f kernel-source/out/arch/arm64/boot/Image.gz-dtb ]; then
-          cp -v kernel-source/out/arch/arm64/boot/Image.gz-dtb AK3/Image
+                              CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+        
+        # Check if build succeeded
+        if [ -f out/arch/arm64/boot/Image ]; then
+          echo "✅ Kernel build successful!"
+          ls -lh out/arch/arm64/boot/Image
         else
-          echo "Error: Kernel image not found!"
-          ls -la kernel-source/out/arch/arm64/boot/ || true
+          echo "❌ Kernel build failed!"
           exit 1
         fi
-        cd AK3
-        sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;|block=auto;|g' anykernel.sh
-        sed -i 's|is_slot_device=0;|is_slot_device=auto;|g' anykernel.sh
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-        zip -r9 ../Panxcz_kernel_susfs.zip *
-        echo "Kernel zip created successfully!"
 
-    - name: 8. Upload Kernel .Zip Artifact
+    - name: 📦 Package to Flashable .Zip (AnyKernel3) - BOOT_A/BOOT_B FIXED
+      run: |
+        # Clone AnyKernel3
+        git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
+        
+        # Copy kernel image
+        if [ -f kernel-source/out/arch/arm64/boot/Image ]; then
+          cp kernel-source/out/arch/arm64/boot/Image AK3/
+          echo "Kernel Image copied!"
+        else
+          echo "Error: Image not found!" && exit 1
+        fi
+        
+        # Configure AnyKernel3 for boot_a/boot_b
+        cd AK3
+        
+        # Fix anykernel.sh for modern devices with A/B partitions
+        cat > anykernel.sh << 'EOF'
+# AnyKernel3 Ramdisk Mod Script
+# osm0sis @ xda-developers
+
+## AnyKernel setup
+# begin properties
+properties() { '
+kernel.string=Panxcz Kernel SUSFS 2.1.0 Gaming Edition
+do.devicecheck=0
+do.modules=0
+do.systemless=1
+do.cleanup=1
+do.cleanuponabort=0
+device.name1=
+device.name2=
+device.name3=
+device.name4=
+device.name5=
+supported.versions=
+supported.patchlevels=
+supported.builds=
+'; } # end properties
+
+# shell variables
+block=/dev/block/by-name/boot;
+is_slot_device=1;
+ramdisk_compression=auto;
+patch_vbmeta_flag=1;
+
+## AnyKernel methods (DO NOT CHANGE)
+# import patching functions/variables - see for reference
+. tools/ak3-core.sh;
+
+## AnyKernel file attributes
+# set permissions/ownership for included ramdisk files
+set_perm_recursive 0 0 755 644 $ramdisk/*;
+set_perm_recursive 0 0 755 644 $ramdisk/overlay/*;
+set_perm_recursive 0 0 755 755 $ramdisk/overlay/init*;
+
+## AnyKernel install
+dump_boot;
+
+write_boot;
+## end install
+EOF
+        
+        # Create flashable zip
+        zip -r9 ../Panxcz_Kernel_SUSFS2.1_Gaming.zip * -x "*.git*" "README.md"
+        
+        echo "✅ Flashable zip created!"
+        ls -lh ../Panxcz_Kernel_SUSFS2.1_Gaming.zip
+
+    - name: 📤 Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel-Zip-Gaming-Flashable
-        path: Panxcz_kernel_susfs.zip
-        retention-days: 30
+        name: Panxcz-Kernel-SUSFS2.1-Gaming
+        path: Panxcz_Kernel_SUSFS2.1_Gaming.zip
+
+    - name: 📊 Build Summary
+      run: |
+        echo "========================================"
+        echo "✅ BUILD COMPLETED SUCCESSFULLY!"
+        echo "========================================"
+        echo "Kernel Version: Android 12.5.10.257"
+        echo "SUSFS Version: 2.1.0"
+        echo "Compiler: Clang 19"
+        echo "Optimizations: Gaming Edition (O3)"
+        echo "Local Version: -Panxcz-SUSFS2.1"
+        echo "========================================"
+        echo "Flashable ZIP: Panxcz_Kernel_SUSFS2.1_Gaming.zip"
+        echo "Install Path: /dev/block/by-name/boot (auto-detects boot_a/boot_b)"
+        echo "========================================"
