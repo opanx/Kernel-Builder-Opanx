@@ -1,4 +1,3 @@
-```yaml
 name: Build Kernel GKI - ReSukiSU + SUSFS (Gaming Edition)
 
 on:
@@ -172,5 +171,3 @@ jobs:
       with:
         name: Kernel-Zip-Gaming-Flashable
         path: Kernel_ReSukiSU_SUSFS_Gaming_Opanx.zip
-
-```
