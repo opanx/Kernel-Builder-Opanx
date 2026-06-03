@@ -17,12 +17,19 @@ jobs:
         chmod +x llvm.sh
         sudo ./llvm.sh 19 all
         
-        # Membuat tautan simbolis agar LLVM=1 mendeteksi Clang 19 secara bawaan
-        sudo ln -sf /usr/bin/clang-19 /usr/bin/clang
-        sudo ln -sf /usr/bin/ld.lld-19 /usr/bin/ld.lld
-        sudo ln -sf /usr/bin/llvm-objcopy-19 /usr/bin/llvm-objcopy
-        sudo ln -sf /usr/bin/llvm-ar-19 /usr/bin/llvm-ar
-        sudo ln -sf /usr/bin/llvm-strip-19 /usr/bin/llvm-strip
+        # Membuat tautan simbolis lengkap dari jalur instalasi LLVM 19 asli
+        LLVM_PATH="/usr/lib/llvm-19/bin"
+        sudo ln -sf "$LLVM_PATH/clang" /usr/bin/clang
+        sudo ln -sf "$LLVM_PATH/ld.lld" /usr/bin/ld.lld
+        sudo ln -sf "$LLVM_PATH/llvm-objcopy" /usr/bin/llvm-objcopy
+        sudo ln -sf "$LLVM_PATH/llvm-ar" /usr/bin/llvm-ar
+        sudo ln -sf "$LLVM_PATH/llvm-strip" /usr/bin/llvm-strip
+        sudo ln -sf "$LLVM_PATH/llvm-nm" /usr/bin/llvm-nm
+        sudo ln -sf "$LLVM_PATH/llvm-objdump" /usr/bin/llvm-objdump
+        sudo ln -sf "$LLVM_PATH/llvm-readelf" /usr/bin/llvm-readelf
+        
+        # Ekspor folder LLVM ke Github Path agar dibaca sistem secara global
+        echo "/usr/lib/llvm-19/bin" >> $GITHUB_PATH
         
         # Verifikasi versi clang yang terpasang
         clang --version
@@ -115,6 +122,9 @@ jobs:
     - name: 6. Gas Compile Kernel GKI (Clang 19)
       run: |
         cd kernel-source
+        
+        # Prioritaskan folder bin LLVM 19 di dalam environment PATH kompilasi
+        export PATH=/usr/lib/llvm-19/bin:$PATH
         
         # Tambahkan konfigurasi SUSFS ke gki_defconfig agar aktif saat kompilasi
         {
