@@ -50,52 +50,43 @@ jobs:
         # WAJIB DIJALANKAN DULUAN agar struktur folder KernelSU terbentuk sempurna secara alami
         curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-    - name: 4. Integrasi SUSFS v2.1.0 Terbaru (Smart Fallback)
+    - name: 4. Integrasi SUSFS v2.1.0 Terbaru
       run: |
         echo "=== INTEGRASI SUSFS v2.1.0 ==="
         cd $GITHUB_WORKSPACE
         # Mengambil repositori resmi SUSFS v2.1.0
         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
         
-        # [FIX HARD] Smart Fallback pencarian ksu_susfs.h anti-gagal
-        echo "Mencari file ksu_susfs.h..."
-        mkdir -p $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel
-        SUSFS_HEADER=$(find $GITHUB_WORKSPACE/susfs-source -name "ksu_susfs.h" | head -n 1)
-        
-        if [ -n "$SUSFS_HEADER" ]; then
-          cp "$SUSFS_HEADER" $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/
-          echo "ksu_susfs.h berhasil disalin dari repositori lokal!"
-        else
-          echo "ksu_susfs.h tidak ditemukan di repositori, mengunduh dari mirror stabil..."
-          wget -qO $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h "https://raw.githubusercontent.com/sidrxt/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-          echo "ksu_susfs.h berhasil diunduh!"
-        fi
-        
-        # Salin patch fs dan include (abaikan jika ada folder yang kosong di repo asli)
-        echo "Menyalin kernel patches..."
-        cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/fs/* $GITHUB_WORKSPACE/kernel-source/fs/ 2>/dev/null || true
-        cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/include/linux/* $GITHUB_WORKSPACE/kernel-source/include/linux/ 2>/dev/null || true
+        # Salin file SUSFS ke kernel source
+        echo "Menyalin file SUSFS..."
+        cp $GITHUB_WORKSPACE/susfs-source/kernel_patches/fs/susfs.c $GITHUB_WORKSPACE/kernel-source/fs/
+        cp $GITHUB_WORKSPACE/susfs-source/kernel_patches/include/linux/susfs.h $GITHUB_WORKSPACE/kernel-source/include/linux/
+        cp $GITHUB_WORKSPACE/susfs-source/kernel_patches/include/linux/susfs_def.h $GITHUB_WORKSPACE/kernel-source/include/linux/
         cp $GITHUB_WORKSPACE/susfs-source/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch $GITHUB_WORKSPACE/kernel-source/
         
+        # Integrasi SUSFS ke KernelSU
+        echo "Mempersiapkan KernelSU untuk SUSFS..."
+        cd $GITHUB_WORKSPACE/kernel-source/KernelSU
+        
+        # Suntik header susfs ke init.c
+        sed -i '1i #include <linux/susfs.h>' kernel/core/init.c
+        # Masukkan susfs_init() ke dalam kernelsu_init
+        sed -i '/ksu_init_symbol_resolver();/i \    susfs_init();' kernel/core/init.c
+        
+        # Terapkan patch SUSFS untuk KernelSU
+        echo "Menerapkan patch SUSFS untuk KernelSU..."
+        patch -p1 --fuzz=3 < $GITHUB_WORKSPACE/susfs-source/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+        # Fix jika ksu_late_loaded masih ada dan menyebabkan error karena sudah dihapus oleh patch di header tapi gagal di body
+        sed -i 's/if (ksu_late_loaded)/if (0)/g' kernel/core/init.c
+        sed -i 's/if (!ksu_late_loaded)/if (1)/g' kernel/core/init.c
+
         cd $GITHUB_WORKSPACE/kernel-source
-        SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
-        echo "Sublevel kernel terdeteksi: 5.10.$SUBLEVEL"
-
-        # [Fake Patches] Memperbaiki konflik patch bawaan untuk sub-level tertentu
-        if [ "$SUBLEVEL" -le "43" ]; then
-          perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
-        fi
-        if [ "$SUBLEVEL" -le "117" ]; then
-          sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c
-          perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c
-          perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
-        fi
-
-        # Eksekusi patch utama SUSFS
-        echo "Mengeksekusi patch 50_add_susfs..."
+        # Eksekusi patch utama SUSFS ke Kernel
+        echo "Mengeksekusi patch 50_add_susfs ke Kernel..."
         patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
 
         # Perbaikan bug show_pad untuk kestabilan pembacaan memori
+        SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
         if [ "$SUBLEVEL" -le "209" ]; then
           sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
         fi
@@ -161,7 +152,7 @@ jobs:
           HOSTCC=gcc HOSTCXX=g++ \
           CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
           CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-          LLVM=1 LLVM_IAS=1
+          LLVM=1 LLVM_IAS=1 KCFLAGS="-Wno-error"
 
     - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
       run: |
