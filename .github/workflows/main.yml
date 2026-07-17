@@ -79,10 +79,11 @@ jobs:
             fi
           fi
 
-      - name: 4. Integrasi SUSFS v2.2.0 (patch wajib berhasil)
+      - name: 4. Integrasi SUSFS v2.2.0 (tanpa mirror)
         run: |
           echo "=== INTEGRASI SUSFS v2.2.0 ==="
           cd $GITHUB_WORKSPACE
+
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
 
           HEADER_DEST="$GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h"
@@ -94,10 +95,12 @@ jobs:
             echo "ksu_susfs.h berhasil disalin dari susfs-source!"
           else
             echo "ksu_susfs.h tidak ditemukan, buat file minimal..."
-            echo "#ifndef _KSU_SUSFS_H" > "$HEADER_DEST"
-            echo "#define _KSU_SUSFS_H" >> "$HEADER_DEST"
-            echo "/* dummy header for SUSFS */" >> "$HEADER_DEST"
-            echo "#endif" >> "$HEADER_DEST"
+            cat > "$HEADER_DEST" << 'EOF'
+          #ifndef _KSU_SUSFS_H
+          #define _KSU_SUSFS_H
+          /* dummy header for SUSFS */
+          #endif
+          EOF
           fi
 
           echo "Menyalin kernel patches..."
@@ -123,9 +126,9 @@ jobs:
 
           [ "$SUBLEVEL" -le "209" ] && sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
 
-      - name: 5. Konfigurasi Optimasi & Matikan BPF/BTF Total (Brutal)
+      - name: 5. Konfigurasi Optimasi & Matikan BPF/BTF Total
         run: |
-          echo "=== KONFIGURASI OPTIMASI & MATIKAN BPF/BTF (BRUTAL) ==="
+          echo "=== KONFIGURASI OPTIMASI & MATIKAN BPF/BTF ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
           find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i \
@@ -147,13 +150,10 @@ jobs:
           rm -rf tools/bpf
           find . -name "Makefile" -exec sed -i '/resolve_btfids/d' {} \;
           find . -name "Makefile" -exec sed -i '/prepare-resolve_btfids/d' {} \;
-
           echo -e "\nprepare-resolve_btfids: ;" >> Makefile
           echo -e "\nresolve_btfids: ;" >> Makefile
           echo -e "\nprepare-resolve_btfids: ;" >> arch/arm64/Makefile 2>/dev/null || true
           echo -e "\nresolve_btfids: ;" >> arch/arm64/Makefile 2>/dev/null || true
-          # Tambahkan juga di scripts/Makefile.build (tempat target mungkin dipanggil)
-          echo -e "\nprepare-resolve_btfids: ;" >> scripts/Makefile.build 2>/dev/null || true
 
           make O=out ARCH=arm64 gki_defconfig
 
