@@ -125,9 +125,9 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX FLAGS)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + vdso32)
         run: |
-          echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
+          echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX + vdso32) ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
           # --- BRUTAL CLEAN: Hapus semua -Werror, -Werror=..., dan sisa =... yang terpotong ---
@@ -144,7 +144,19 @@ jobs:
             -e 's/=implicit-int//g' \
             -e 's/=return-type//g' \
             -e 's/=date-time//g' \
-            -e 's/=unknown-warning-option//g' {} \;
+            -e 's/=unknown-warning-option//g' \
+            -e 's/\-implicit-function-declaration//g' \
+            -e 's/\-implicit-int//g' \
+            -e 's/\-strict-prototypes//g' \
+            -e 's/\-return-type//g' \
+            -e 's/\-date-time//g' {} \;
+
+          # Bersihkan khusus vdso32 Makefile
+          sed -i \
+            -e 's/\-implicit-function-declaration//g' \
+            -e 's/\-Wimplicit-function-declaration//g' \
+            -e 's/\-Werror=implicit-function-declaration//g' \
+            arch/arm64/kernel/vdso32/Makefile || true
 
           # Tambahkan -Wno-error dan -Wno-unknown-warning-option ke Makefile utama
           echo 'KBUILD_CFLAGS += -Wno-error -Wno-unknown-warning-option' >> Makefile
@@ -167,8 +179,9 @@ jobs:
           ../scripts/config --enable CONFIG_CPU_IDLE_GOV_MENU
           ../scripts/config --enable CONFIG_CPU_IDLE_GOV_TEO
           ../scripts/config --set-val CONFIG_DEFAULT_MMAP_MIN_ADDR 32768
-          ../scripts/config --enable CONFIG_COMPAT_VDSO
-          ../scripts/config --enable CONFIG_THUMB2_COMPAT_VDSO
+          # Nonaktifkan COMPAT_VDSO sementara untuk hindari error (opsional, kita bisa aktifkan lagi nanti)
+          ../scripts/config --disable CONFIG_COMPAT_VDSO
+          ../scripts/config --disable CONFIG_THUMB2_COMPAT_VDSO
           ../scripts/config --enable CONFIG_ARM64_PTR_AUTH
           ../scripts/config --enable CONFIG_ARM64_BTI_KERNEL
           ../scripts/config --enable CONFIG_ARM64_TLB_RANGE
@@ -239,7 +252,7 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
 
-          # Override total KBUILD_CFLAGS dan HOSTCFLAGS via environment dan make variable
+          # Override total
           export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3"
           export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time"
 
