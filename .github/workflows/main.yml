@@ -125,7 +125,7 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HACK Makefile + matikan BPF/BTF)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HACK Makefile override + paksa .config)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
           cd $GITHUB_WORKSPACE/kernel-source
@@ -162,6 +162,10 @@ jobs:
           echo 'KBUILD_CFLAGS += -Wno-error -Wno-unknown-warning-option -Wno-pointer-sign' >> Makefile
           echo 'HOSTCFLAGS += -Wno-error -Wno-unknown-warning-option -Wno-pointer-sign' >> Makefile
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
+
+          # Override target resolve_btfids dan prepare-resolve_btfids agar no-op
+          echo -e "\nresolve_btfids: ;" >> Makefile
+          echo -e "\nprepare-resolve_btfids: ;" >> Makefile
 
           # Generate defconfig
           make O=out ARCH=arm64 gki_defconfig
@@ -259,9 +263,8 @@ jobs:
           # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-          # HACK: Hapus target resolve_btfids dari Makefile
-          sed -i '/prepare-resolve_btfids/d' Makefile
-          sed -i '/resolve_btfids/d' Makefile
+          # Paksa BTF mati di .config (tambahan)
+          sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/' out/.config
 
           # Verifikasi & paksa semua opsi mati
           echo "=== CEK KONFIGURASI KVM, BTF, BPF ==="
