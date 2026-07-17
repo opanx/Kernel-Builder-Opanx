@@ -49,7 +49,7 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel-source
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-      - name: 4. Integrasi SUSFS v2.2.0 (dengan patch wajib berhasil)
+      - name: 4. Integrasi SUSFS v2.2.0 (patch wajib berhasil)
         run: |
           echo "=== INTEGRASI SUSFS v2.2.0 ==="
           cd $GITHUB_WORKSPACE
@@ -125,99 +125,104 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (fix Werror)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (hard fix Werror & config)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
-          # HAPUS SEMUA -Werror dan -Werror=... (biar clang ga error)
-          find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g' || true
-          # Hapus juga di arch/arm64/Makefile khusus
-          sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g' arch/arm64/Makefile || true
+          # 1. Hapus semua -Werror dan -Werror=... dari semua Makefile
+          find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g; s/-Wstrict-prototypes//g' || true
+          sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g; s/-Wstrict-prototypes//g' arch/arm64/Makefile || true
+          sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g; s/-Wstrict-prototypes//g' scripts/Makefile.extrawarn || true
 
-          cat << 'EOF' >> arch/arm64/configs/gki_defconfig
-          # ===== OPTIMASI GAMING =====
-          CONFIG_HZ_1000=y
-          CONFIG_HZ=1000
-          CONFIG_SCHED_AUTOGROUP=y
-          CONFIG_CFS_BANDWIDTH=y
-          CONFIG_RT_GROUP_SCHED=y
-          CONFIG_ENERGY_MODEL=y
-          CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-          CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
-          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
-          CONFIG_CPU_IDLE_GOV_MENU=y
-          CONFIG_CPU_IDLE_GOV_TEO=y
-          CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
-          CONFIG_COMPAT_VDSO=y
-          CONFIG_THUMB2_COMPAT_VDSO=y
-          CONFIG_ARM64_PTR_AUTH=y
-          CONFIG_ARM64_BTI_KERNEL=y
-          CONFIG_ARM64_TLB_RANGE=y
-          CONFIG_ARM64_MTE=y
-          CONFIG_SHADOW_CALL_STACK=n
-          CONFIG_LLVM_POLLY=y
-          CONFIG_INIT_STACK_NONE=y
-          CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
-          CONFIG_KASAN_GENERIC=y
-          CONFIG_KASAN_OUTLINE=y
-          CONFIG_KASAN_STACK=y
-          CONFIG_ARM64_ERRATUM_843419=n
-          CONFIG_ARM64_ERRATUM_845719=n
-          CONFIG_ARM64_ERRATUM_1024718=n
-          CONFIG_ARM64_ERRATUM_1418040=n
-          CONFIG_ARM64_ERRATUM_1165522=n
-          CONFIG_ARM64_ERRATUM_1286807=n
-          CONFIG_ARM64_ERRATUM_1463225=n
-          CONFIG_ARM64_ERRATUM_1542419=n
-          CONFIG_ARM64_ERRATUM_1508412=n
-          CONFIG_ARM64_ERRATUM_2054223=n
-          CONFIG_ARM64_ERRATUM_2067961=n
-          CONFIG_ARM64_ERRATUM_2077057=n
-          CONFIG_ARM64_ERRATUM_2081180=n
-          CONFIG_ARM64_ERRATUM_2139208=n
-          CONFIG_ARM64_ERRATUM_2441009=n
-          CONFIG_ARM64_ERRATUM_2457168=n
-          CONFIG_ARM64_ERRATUM_2645198=n
-          # ===== OPTIMASI MEMORY =====
-          CONFIG_ZRAM=y
-          CONFIG_ZRAM_DEF_COMP_LZ4=y
-          CONFIG_ZRAM_DEF_COMP="lz4"
-          CONFIG_ZSMALLOC=y
-          CONFIG_TRANSPARENT_HUGEPAGE=y
-          CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS=y
-          CONFIG_CLEANCACHE=y
-          CONFIG_FRONTSWAP=y
-          CONFIG_MEMORY_BALLOON=y
-          CONFIG_BALLOON_COMPACTION=y
-          CONFIG_COMPACTION=y
-          CONFIG_MIGRATION=y
-          CONFIG_KSM=y
-          CONFIG_LZ4_COMPRESS=y
-          CONFIG_LZ4_DECOMPRESS=y
-          CONFIG_CRYPTO_LZ4=y
-          CONFIG_CRYPTO_LZ4HC=y
-          # ===== MATIKAN HEADERS_INSTALL, PAKSA LTO NONE, DLL =====
-          CONFIG_HEADERS_INSTALL=n
-          CONFIG_LTO_NONE=y
-          CONFIG_RELR=y
-          CONFIG_ARCH_MMAP_RND_BITS=18
-          CONFIG_ARCH_MMAP_RND_COMPAT_BITS=11
-          # ===== OVERHEAD DEBUG DI NONAKTIFKAN =====
-          # CONFIG_DEBUG_INFO is not set
-          CONFIG_DEBUG_INFO_REDUCED=n
-          CONFIG_SLUB_DEBUG=n
-          CONFIG_PANIC_ON_OOPS=n
-          CONFIG_LOCKUP_DETECTOR=n
-          CONFIG_SCHED_DEBUG=n
-          CONFIG_WERROR=n
-          CONFIG_FRAME_WARN=4096
-          CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
-          EOF
+          # 2. Tambahkan flag -Wno-unknown-warning-option ke KBUILD_CFLAGS di Makefile
+          echo 'KBUILD_CFLAGS += -Wno-unknown-warning-option -Wno-error' >> Makefile
+          echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
+          echo 'HOSTCFLAGS += -Wno-unknown-warning-option -Wno-error' >> Makefile
 
-          # Tambah flag optimasi dan disable warning di Makefile (aman)
-          echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto -Wno-unknown-warning-option -Wno-error' >> Makefile
-          echo 'KBUILD_LDFLAGS += -Wno-unknown-warning-option' >> Makefile
+          # 3. Buat defconfig dulu
+          make O=out ARCH=arm64 gki_defconfig
+
+          # 4. Set semua opsi konfigurasi menggunakan scripts/config (biar presisi)
+          cd out
+          # Aktifkan gaming & memory
+          ../scripts/config --enable CONFIG_HZ_1000 --set-val CONFIG_HZ 1000
+          ../scripts/config --enable CONFIG_SCHED_AUTOGROUP
+          ../scripts/config --enable CONFIG_CFS_BANDWIDTH
+          ../scripts/config --enable CONFIG_RT_GROUP_SCHED
+          ../scripts/config --enable CONFIG_ENERGY_MODEL
+          ../scripts/config --enable CONFIG_CPU_FREQ_GOV_SCHEDUTIL
+          ../scripts/config --enable CONFIG_CPU_FREQ_GOV_PERFORMANCE
+          ../scripts/config --enable CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+          ../scripts/config --enable CONFIG_CPU_IDLE_GOV_MENU
+          ../scripts/config --enable CONFIG_CPU_IDLE_GOV_TEO
+          ../scripts/config --set-val CONFIG_DEFAULT_MMAP_MIN_ADDR 32768
+          ../scripts/config --enable CONFIG_COMPAT_VDSO
+          ../scripts/config --enable CONFIG_THUMB2_COMPAT_VDSO
+          ../scripts/config --enable CONFIG_ARM64_PTR_AUTH
+          ../scripts/config --enable CONFIG_ARM64_BTI_KERNEL
+          ../scripts/config --enable CONFIG_ARM64_TLB_RANGE
+          ../scripts/config --enable CONFIG_ARM64_MTE
+          ../scripts/config --disable CONFIG_SHADOW_CALL_STACK
+          ../scripts/config --enable CONFIG_LLVM_POLLY
+          ../scripts/config --enable CONFIG_INIT_STACK_NONE
+          ../scripts/config --enable CONFIG_INIT_ON_ALLOC_DEFAULT_ON
+          ../scripts/config --enable CONFIG_KASAN_GENERIC
+          ../scripts/config --enable CONFIG_KASAN_OUTLINE
+          ../scripts/config --enable CONFIG_KASAN_STACK
+          # Nonaktifkan erratum yang gak perlu
+          for err in 843419 845719 1024718 1418040 1165522 1286807 1463225 1542419 1508412 2054223 2067961 2077057 2081180 2139208 2441009 2457168 2645198; do
+            ../scripts/config --disable CONFIG_ARM64_ERRATUM_$err
+          done
+          # Memory
+          ../scripts/config --enable CONFIG_ZRAM
+          ../scripts/config --set-val CONFIG_ZRAM_DEF_COMP lz4
+          ../scripts/config --enable CONFIG_ZRAM_DEF_COMP_LZ4
+          ../scripts/config --enable CONFIG_ZSMALLOC
+          ../scripts/config --enable CONFIG_TRANSPARENT_HUGEPAGE
+          ../scripts/config --enable CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS
+          ../scripts/config --enable CONFIG_CLEANCACHE
+          ../scripts/config --enable CONFIG_FRONTSWAP
+          ../scripts/config --enable CONFIG_MEMORY_BALLOON
+          ../scripts/config --enable CONFIG_BALLOON_COMPACTION
+          ../scripts/config --enable CONFIG_COMPACTION
+          ../scripts/config --enable CONFIG_MIGRATION
+          ../scripts/config --enable CONFIG_KSM
+          ../scripts/config --enable CONFIG_LZ4_COMPRESS
+          ../scripts/config --enable CONFIG_LZ4_DECOMPRESS
+          ../scripts/config --enable CONFIG_CRYPTO_LZ4
+          ../scripts/config --enable CONFIG_CRYPTO_LZ4HC
+          # Matikan debug & headers
+          ../scripts/config --disable CONFIG_HEADERS_INSTALL
+          ../scripts/config --disable CONFIG_LTO_NONE   # pilih none
+          ../scripts/config --enable CONFIG_LTO_NONE
+          ../scripts/config --enable CONFIG_RELR
+          ../scripts/config --set-val CONFIG_ARCH_MMAP_RND_BITS 18
+          ../scripts/config --set-val CONFIG_ARCH_MMAP_RND_COMPAT_BITS 11
+          ../scripts/config --disable CONFIG_DEBUG_INFO
+          ../scripts/config --disable CONFIG_SLUB_DEBUG
+          ../scripts/config --disable CONFIG_PANIC_ON_OOPS
+          ../scripts/config --disable CONFIG_LOCKUP_DETECTOR
+          ../scripts/config --disable CONFIG_SCHED_DEBUG
+          ../scripts/config --disable CONFIG_WERROR
+          ../scripts/config --set-val CONFIG_FRAME_WARN 4096
+          ../scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+          # Tambahkan SUSFS
+          ../scripts/config --enable CONFIG_KSU_SUSFS
+          ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
+          ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+          ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_KSTAT
+          ../scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
+          ../scripts/config --disable CONFIG_KSU_SUSFS_ENABLE_LOG
+          ../scripts/config --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+          ../scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+          ../scripts/config --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
+          ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_MAP
+          ../scripts/config --set-val CONFIG_LOCALVERSION "-Panxcz-susfs"
+          cd ..
+
+          # 5. Jalankan olddefconfig untuk fix dependency
+          make O=out ARCH=arm64 olddefconfig
 
       - name: 6. Proses Kompilasi Kernel (Clang 22)
         run: |
@@ -225,30 +230,14 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
 
-          {
-            echo "CONFIG_KSU_SUSFS=y"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n"
-            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
-            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
-            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
-            echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
-            echo 'CONFIG_LOCALVERSION="-Panxcz-susfs"'
-          } >> arch/arm64/configs/gki_defconfig
-
-          make O=out ARCH=arm64 gki_defconfig
-          make O=out ARCH=arm64 olddefconfig   # ← ini otomatis jawab semua prompt
-
-          # Build dengan KCFLAGS tambahan
+          # Build Image dan modules
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 \
             KCFLAGS="-Wno-unknown-warning-option -Wno-error" \
+            HOSTCFLAGS="-Wno-unknown-warning-option -Wno-error" \
             Image modules
 
       - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
