@@ -79,7 +79,7 @@ jobs:
             fi
           fi
 
-      - name: 4. Integrasi SUSFS v2.2.0 (tanpa mirror)
+      - name: 4. Integrasi SUSFS v2.2.0 (langsung buat dummy header)
         run: |
           echo "=== INTEGRASI SUSFS v2.2.0 ==="
           cd $GITHUB_WORKSPACE
@@ -89,6 +89,7 @@ jobs:
           HEADER_DEST="$GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h"
           mkdir -p "$(dirname "$HEADER_DEST")"
 
+          # Cari ksu_susfs.h di susfs-source (jika ada)
           SUSFS_HEADER=$(find susfs-source -name "ksu_susfs.h" | head -n 1)
           if [ -n "$SUSFS_HEADER" ]; then
             cp "$SUSFS_HEADER" "$HEADER_DEST"
