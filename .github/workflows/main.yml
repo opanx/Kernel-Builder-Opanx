@@ -125,7 +125,7 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + matikan BPF & BTF total)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HACK Makefile + matikan BPF/BTF)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
           cd $GITHUB_WORKSPACE/kernel-source
@@ -179,7 +179,7 @@ jobs:
           ../scripts/config --enable CONFIG_CPU_IDLE_GOV_MENU
           ../scripts/config --enable CONFIG_CPU_IDLE_GOV_TEO
           ../scripts/config --set-val CONFIG_DEFAULT_MMAP_MIN_ADDR 32768
-          # Matikan COMPAT_VDSO (biar gak ribet)
+          # Matikan COMPAT_VDSO
           ../scripts/config --disable CONFIG_COMPAT_VDSO
           ../scripts/config --disable CONFIG_THUMB2_COMPAT_VDSO
           ../scripts/config --enable CONFIG_ARM64_PTR_AUTH
@@ -188,7 +188,7 @@ jobs:
           ../scripts/config --enable CONFIG_ARM64_MTE
           ../scripts/config --disable CONFIG_SHADOW_CALL_STACK
           ../scripts/config --enable CONFIG_LLVM_POLLY
-          # Matikan KVM & virtualization total
+          # Matikan KVM
           ../scripts/config --disable CONFIG_VIRTUALIZATION
           ../scripts/config --disable CONFIG_KVM
           ../scripts/config --disable CONFIG_ARM64_KVM
@@ -199,7 +199,9 @@ jobs:
           ../scripts/config --disable CONFIG_BPF
           ../scripts/config --disable CONFIG_BPF_SYSCALL
           ../scripts/config --disable CONFIG_HAVE_BPF_JIT
+          ../scripts/config --disable CONFIG_BPF_EVENTS
           ../scripts/config --disable CONFIG_DEBUG_INFO_BTF
+          ../scripts/config --disable CONFIG_DEBUG_INFO_BTF_MODULES
           # Matikan semua debug & KASAN/UBSAN
           ../scripts/config --disable CONFIG_KASAN
           ../scripts/config --disable CONFIG_UBSAN
@@ -257,10 +259,14 @@ jobs:
           # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-          # Verifikasi & paksa KVM & BTF & BPF mati
+          # HACK: Hapus target resolve_btfids dari Makefile
+          sed -i '/prepare-resolve_btfids/d' Makefile
+          sed -i '/resolve_btfids/d' Makefile
+
+          # Verifikasi & paksa semua opsi mati
           echo "=== CEK KONFIGURASI KVM, BTF, BPF ==="
           grep -E "CONFIG_KVM|CONFIG_DEBUG_INFO_BTF|CONFIG_BPF" out/.config || true
-          for opt in KVM DEBUG_INFO_BTF BPF BPF_SYSCALL; do
+          for opt in KVM DEBUG_INFO_BTF BPF BPF_SYSCALL HAVE_BPF_JIT BPF_EVENTS DEBUG_INFO_BTF_MODULES; do
             if grep -q "CONFIG_${opt}=y" out/.config; then
               echo "!!! ${opt} masih aktif, paksa disable !!!"
               sed -i "s/CONFIG_${opt}=y/CONFIG_${opt}=n/" out/.config
@@ -289,10 +295,10 @@ jobs:
             exit 1
           fi
 
-          # Generate ulang config agar out directory baru pakai config yang sudah diset
+          # Generate ulang config
           make O=out ARCH=arm64 olddefconfig
 
-          # Build vmlinux dulu (single-thread, verbose) agar error link jelas
+          # Build vmlinux
           make -j1 O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
@@ -303,7 +309,7 @@ jobs:
             V=1 \
             vmlinux 2>&1 | tee build.log
 
-          # Kalau vmlinux sukses, lanjut build Image (parallel untuk kecepatan)
+          # Kalau vmlinux sukses, lanjut build Image
           if [ -f out/vmlinux ]; then
             echo "vmlinux berhasil dibuild, lanjut build Image..."
             make -j$(nproc --all) O=out ARCH=arm64 \
