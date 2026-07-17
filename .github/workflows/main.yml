@@ -125,7 +125,7 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + matikan KVM & BTF)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + matikan BPF & BTF total)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
           cd $GITHUB_WORKSPACE/kernel-source
@@ -195,7 +195,10 @@ jobs:
           ../scripts/config --disable CONFIG_KVM_ARM_HOST
           ../scripts/config --disable CONFIG_HAVE_KVM
           ../scripts/config --disable CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT
-          # Matikan BTF (BPF Type Format)
+          # Matikan BPF & BTF total
+          ../scripts/config --disable CONFIG_BPF
+          ../scripts/config --disable CONFIG_BPF_SYSCALL
+          ../scripts/config --disable CONFIG_HAVE_BPF_JIT
           ../scripts/config --disable CONFIG_DEBUG_INFO_BTF
           # Matikan semua debug & KASAN/UBSAN
           ../scripts/config --disable CONFIG_KASAN
@@ -254,17 +257,15 @@ jobs:
           # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-          # Verifikasi & paksa KVM & BTF mati
-          echo "=== CEK KONFIGURASI KVM & BTF ==="
-          grep -E "CONFIG_KVM|CONFIG_DEBUG_INFO_BTF" out/.config || true
-          if grep -q "CONFIG_KVM=y" out/.config; then
-            echo "!!! KVM masih aktif, paksa disable !!!"
-            sed -i 's/CONFIG_KVM=y/CONFIG_KVM=n/' out/.config
-          fi
-          if grep -q "CONFIG_DEBUG_INFO_BTF=y" out/.config; then
-            echo "!!! BTF masih aktif, paksa disable !!!"
-            sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/' out/.config
-          fi
+          # Verifikasi & paksa KVM & BTF & BPF mati
+          echo "=== CEK KONFIGURASI KVM, BTF, BPF ==="
+          grep -E "CONFIG_KVM|CONFIG_DEBUG_INFO_BTF|CONFIG_BPF" out/.config || true
+          for opt in KVM DEBUG_INFO_BTF BPF BPF_SYSCALL; do
+            if grep -q "CONFIG_${opt}=y" out/.config; then
+              echo "!!! ${opt} masih aktif, paksa disable !!!"
+              sed -i "s/CONFIG_${opt}=y/CONFIG_${opt}=n/" out/.config
+            fi
+          done
           make O=out ARCH=arm64 olddefconfig
 
       - name: 6. Build vmlinux & Image (Verbose + Single-thread + clean out)
