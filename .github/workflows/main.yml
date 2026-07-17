@@ -125,12 +125,12 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + vdso32)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + matikan debug)
         run: |
-          echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX + vdso32) ==="
+          echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
-          # --- BRUTAL CLEAN: Hapus semua -Werror, -Werror=..., dan sisa =... yang terpotong ---
+          # --- BRUTAL CLEAN: Hapus semua -Werror dan -Werror=..., dan semua pola =... ---
           find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i \
             -e 's/\-Werror\b//g' \
             -e 's/\-Werror=[^ ]*//g' \
@@ -151,23 +151,23 @@ jobs:
             -e 's/\-return-type//g' \
             -e 's/\-date-time//g' {} \;
 
-          # Bersihkan khusus vdso32 Makefile
+          # Bersihkan khusus vdso32 Makefile (jika ada)
           sed -i \
             -e 's/\-implicit-function-declaration//g' \
             -e 's/\-Wimplicit-function-declaration//g' \
             -e 's/\-Werror=implicit-function-declaration//g' \
-            arch/arm64/kernel/vdso32/Makefile || true
+            arch/arm64/kernel/vdso32/Makefile 2>/dev/null || true
 
-          # Tambahkan -Wno-error dan -Wno-unknown-warning-option ke Makefile utama
-          echo 'KBUILD_CFLAGS += -Wno-error -Wno-unknown-warning-option' >> Makefile
-          echo 'HOSTCFLAGS += -Wno-error -Wno-unknown-warning-option' >> Makefile
+          # Tambahkan flag aman ke Makefile utama
+          echo 'KBUILD_CFLAGS += -Wno-error -Wno-unknown-warning-option -Wno-pointer-sign' >> Makefile
+          echo 'HOSTCFLAGS += -Wno-error -Wno-unknown-warning-option -Wno-pointer-sign' >> Makefile
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
 
-          # Generate defconfig dan atur opsi dengan scripts/config
+          # Generate defconfig
           make O=out ARCH=arm64 gki_defconfig
 
           cd out
-          # Gaming
+          # Set semua opsi konfigurasi dengan scripts/config
           ../scripts/config --enable CONFIG_HZ_1000 --set-val CONFIG_HZ 1000
           ../scripts/config --enable CONFIG_SCHED_AUTOGROUP
           ../scripts/config --enable CONFIG_CFS_BANDWIDTH
@@ -179,7 +179,7 @@ jobs:
           ../scripts/config --enable CONFIG_CPU_IDLE_GOV_MENU
           ../scripts/config --enable CONFIG_CPU_IDLE_GOV_TEO
           ../scripts/config --set-val CONFIG_DEFAULT_MMAP_MIN_ADDR 32768
-          # Nonaktifkan COMPAT_VDSO sementara untuk hindari error (opsional, kita bisa aktifkan lagi nanti)
+          # Matikan COMPAT_VDSO (biar gak ribet)
           ../scripts/config --disable CONFIG_COMPAT_VDSO
           ../scripts/config --disable CONFIG_THUMB2_COMPAT_VDSO
           ../scripts/config --enable CONFIG_ARM64_PTR_AUTH
@@ -188,15 +188,17 @@ jobs:
           ../scripts/config --enable CONFIG_ARM64_MTE
           ../scripts/config --disable CONFIG_SHADOW_CALL_STACK
           ../scripts/config --enable CONFIG_LLVM_POLLY
-          ../scripts/config --enable CONFIG_INIT_STACK_NONE
-          ../scripts/config --enable CONFIG_INIT_ON_ALLOC_DEFAULT_ON
-          ../scripts/config --enable CONFIG_KASAN_GENERIC
-          ../scripts/config --enable CONFIG_KASAN_OUTLINE
-          ../scripts/config --enable CONFIG_KASAN_STACK
-          # Nonaktifkan erratum
-          for err in 843419 845719 1024718 1418040 1165522 1286807 1463225 1542419 1508412 2054223 2067961 2077057 2081180 2139208 2441009 2457168 2645198; do
-            ../scripts/config --disable CONFIG_ARM64_ERRATUM_$err
-          done
+          # Matikan semua debug & KASAN/UBSAN
+          ../scripts/config --disable CONFIG_KASAN
+          ../scripts/config --disable CONFIG_UBSAN
+          ../scripts/config --disable CONFIG_DEBUG_INFO
+          ../scripts/config --disable CONFIG_SLUB_DEBUG
+          ../scripts/config --disable CONFIG_PANIC_ON_OOPS
+          ../scripts/config --disable CONFIG_LOCKUP_DETECTOR
+          ../scripts/config --disable CONFIG_SCHED_DEBUG
+          ../scripts/config --disable CONFIG_WERROR
+          ../scripts/config --set-val CONFIG_FRAME_WARN 4096
+          ../scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
           # Memory
           ../scripts/config --enable CONFIG_ZRAM
           ../scripts/config --set-val CONFIG_ZRAM_DEF_COMP lz4
@@ -215,20 +217,16 @@ jobs:
           ../scripts/config --enable CONFIG_LZ4_DECOMPRESS
           ../scripts/config --enable CONFIG_CRYPTO_LZ4
           ../scripts/config --enable CONFIG_CRYPTO_LZ4HC
-          # Debug & lain
+          # Matikan HEADERS_INSTALL & LTO
           ../scripts/config --disable CONFIG_HEADERS_INSTALL
           ../scripts/config --enable CONFIG_LTO_NONE
           ../scripts/config --enable CONFIG_RELR
           ../scripts/config --set-val CONFIG_ARCH_MMAP_RND_BITS 18
           ../scripts/config --set-val CONFIG_ARCH_MMAP_RND_COMPAT_BITS 11
-          ../scripts/config --disable CONFIG_DEBUG_INFO
-          ../scripts/config --disable CONFIG_SLUB_DEBUG
-          ../scripts/config --disable CONFIG_PANIC_ON_OOPS
-          ../scripts/config --disable CONFIG_LOCKUP_DETECTOR
-          ../scripts/config --disable CONFIG_SCHED_DEBUG
-          ../scripts/config --disable CONFIG_WERROR
-          ../scripts/config --set-val CONFIG_FRAME_WARN 4096
-          ../scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+          # Nonaktifkan erratum
+          for err in 843419 845719 1024718 1418040 1165522 1286807 1463225 1542419 1508412 2054223 2067961 2077057 2081180 2139208 2441009 2457168 2645198; do
+            ../scripts/config --disable CONFIG_ARM64_ERRATUM_$err
+          done
           # SUSFS
           ../scripts/config --enable CONFIG_KSU_SUSFS
           ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
@@ -246,26 +244,43 @@ jobs:
           # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 6. Proses Kompilasi Kernel (OVERRIDE FLAGS TOTAL)
+      - name: 6. Build Image Only (dengan log capture)
         run: |
-          echo "=== MEMULAI KOMPILASI KERNEL (OVERRIDE) ==="
+          echo "=== BUILD IMAGE ONLY ==="
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
 
-          # Override total
-          export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3"
-          export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time"
+          # Override flags total
+          export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3"
+          export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time"
 
+          # Build Image saja (tanpa modules) dan simpan log
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 \
-            KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3" \
-            HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time" \
-            Image modules
+            KBUILD_CFLAGS="$KBUILD_CFLAGS" \
+            HOSTCFLAGS="$HOSTCFLAGS" \
+            Image 2>&1 | tee build.log
 
-      - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
+          # Cek apakah Image berhasil
+          if [ ! -f out/arch/arm64/boot/Image ]; then
+            echo "Image gagal dibuild! Cek log di bawah:"
+            tail -n 100 build.log
+            exit 1
+          fi
+
+          echo "Image berhasil dibuild!"
+
+      - name: 7. Simpan build.log sebagai artifact (untuk debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: kernel-source/build.log
+        if: always()
+
+      - name: 8. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
         run: |
           echo "=== PACKING ZIP INSTALASI ==="
           cd $GITHUB_WORKSPACE
@@ -286,7 +301,7 @@ jobs:
 
           zip -r9 ../Panxcz_kernel_susfs.zip *
 
-      - name: 8. Mengunggah Hasil Build Jadi
+      - name: 9. Mengunggah Hasil Build Jadi
         uses: actions/upload-artifact@v4
         with:
           name: Panxcz_kernel_susfs
