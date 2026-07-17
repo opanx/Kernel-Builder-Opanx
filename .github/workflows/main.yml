@@ -217,8 +217,9 @@ jobs:
           ../scripts/config --enable CONFIG_LZ4_DECOMPRESS
           ../scripts/config --enable CONFIG_CRYPTO_LZ4
           ../scripts/config --enable CONFIG_CRYPTO_LZ4HC
-          # Matikan HEADERS_INSTALL & LTO
+          # Matikan HEADERS_INSTALL, MODULES, & LTO
           ../scripts/config --disable CONFIG_HEADERS_INSTALL
+          ../scripts/config --disable CONFIG_MODULES
           ../scripts/config --enable CONFIG_LTO_NONE
           ../scripts/config --enable CONFIG_RELR
           ../scripts/config --set-val CONFIG_ARCH_MMAP_RND_BITS 18
@@ -244,17 +245,17 @@ jobs:
           # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 6. Build Image Only (dengan pipefail & log)
+      - name: 6. Build vmlinux + Image (dengan V=1 & pipefail)
         run: |
           set -o pipefail
-          echo "=== BUILD IMAGE ONLY ==="
+          echo "=== BUILD vmlinux & Image ==="
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
 
           export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3"
           export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time"
 
-          # Build Image, kalau gagal maka exit dengan error make
+          # Build vmlinux (untuk lihat link error)
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
@@ -262,12 +263,23 @@ jobs:
             LLVM=1 LLVM_IAS=1 \
             KBUILD_CFLAGS="$KBUILD_CFLAGS" \
             HOSTCFLAGS="$HOSTCFLAGS" \
-            Image 2>&1 | tee build.log
+            V=1 \
+            vmlinux 2>&1 | tee build.log
 
-          # Kalau sampai sini, make sukses. Cek Image.
+          # Lanjutkan build Image
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            HOSTCC=gcc HOSTCXX=g++ \
+            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 LLVM_IAS=1 \
+            KBUILD_CFLAGS="$KBUILD_CFLAGS" \
+            HOSTCFLAGS="$HOSTCFLAGS" \
+            V=1 \
+            Image 2>&1 | tee -a build.log
+
           if [ ! -f out/arch/arm64/boot/Image ]; then
             echo "Image gagal dibuild! Cek log di bawah:"
-            tail -n 100 build.log
+            tail -n 200 build.log
             exit 1
           fi
           echo "Image berhasil dibuild!"
