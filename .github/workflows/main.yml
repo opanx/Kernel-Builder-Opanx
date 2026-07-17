@@ -1,28 +1,35 @@
-name: Build Kernel GKI - Panxcz Gaming SUSFS
+name: Build Kernel GKI - Panxcz Gaming (SUSFS)
 
 on:
   workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Pilih varian KernelSU'
+        required: true
+        default: 'resukisu'
+        type: choice
+        options:
+          - resukisu
+          - kernelsu-next
 
 jobs:
   build-kernel:
-    name: Kompilasi Kernel GKI (Android 12 - 5.10.258)
+    name: Build Kernel (Clang 20)
     runs-on: ubuntu-22.04
 
     steps:
-      # ============================================================
-      # STEP 1: Setup environment + Clang 22 + libelf
-      # ============================================================
-      - name: 1. Persiapan Server & Pemasangan Clang 22
+      - name: 1. Setup Environment & Clang 20
         run: |
-          echo "=== MEMULAI SETUP ENVIRONMENT ==="
+          echo "=== SETUP ENVIRONMENT & CLANG 20 ==="
           sudo apt-get update
           sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg libelf-dev
 
+          # Install Clang 20
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 22 all
+          sudo ./llvm.sh 20 all
 
-          LLVM_BIN_PATH="/usr/lib/llvm-22/bin"
+          LLVM_BIN_PATH="/usr/lib/llvm-20/bin"
           sudo ln -sf "$LLVM_BIN_PATH/clang" /usr/bin/clang
           sudo ln -sf "$LLVM_BIN_PATH/ld.lld" /usr/bin/ld.lld
           sudo ln -sf "$LLVM_BIN_PATH/llvm-objcopy" /usr/bin/llvm-objcopy
@@ -36,265 +43,182 @@ jobs:
           echo "=== VERIFIKASI COMPILER ==="
           clang --version
 
-      # ============================================================
-      # STEP 2: Clone kernel source & set version 5.10.258
-      # ============================================================
-      - name: 2. Kloning Source Kernel & Set Version 5.10.258 (branch millennium-base)
+      - name: 2. Clone Kernel Source (millennium-base)
         run: |
-          echo "=== CLONING KERNEL SOURCE ==="
+          echo "=== CLONE KERNEL SOURCE ==="
           git clone --depth=1 -b millennium-base https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
-
           cd kernel-source
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 258/' Makefile
           sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -Panxcz-gaming/' Makefile
-          echo "Versi kernel: $(make kernelversion 2>/dev/null || cat Makefile | grep -E '^VERSION|^PATCHLEVEL|^SUBLEVEL|^EXTRAVERSION' | tr '\n' ' ')"
 
-      # ============================================================
-      # STEP 3: Integrate ReSukiSU (KernelSU fork)
-      # ============================================================
-      - name: 3. Suntik ReSukiSU Core
+      - name: 3. Integrasi KernelSU (varian pilihan)
         run: |
-          echo "=== MENYUNTIKKAN RESUKISU CORE ==="
-          cd $GITHUB_WORKSPACE/kernel-source
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          echo "=== INTEGRASI KERNELSU VARIAN: ${{ github.event.inputs.variant }} ==="
+          cd kernel-source
+          if [ "${{ github.event.inputs.variant }}" = "resukisu" ]; then
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          else
+            curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/main/kernel/setup.sh" | bash -s main
+          fi
 
-      # ============================================================
-      # STEP 4: Integrate SUSFS v2.2.0 (patch harus berhasil)
-      # ============================================================
       - name: 4. Integrasi SUSFS v2.2.0 (patch wajib berhasil)
         run: |
           echo "=== INTEGRASI SUSFS v2.2.0 ==="
           cd $GITHUB_WORKSPACE
-
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
 
           HEADER_DEST="$GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h"
           mkdir -p "$(dirname "$HEADER_DEST")"
 
           if [ -f "$HEADER_DEST" ]; then
-            echo "ksu_susfs.h sudah ada dari ReSukiSU."
+            echo "ksu_susfs.h sudah ada."
           else
-            echo "Mencari ksu_susfs.h dari susfs-source..."
+            echo "Mencari ksu_susfs.h..."
             SUSFS_HEADER=$(find $GITHUB_WORKSPACE/susfs-source -name "ksu_susfs.h" | head -n 1)
             if [ -n "$SUSFS_HEADER" ]; then
               cp "$SUSFS_HEADER" "$HEADER_DEST"
               echo "Berhasil disalin!"
             else
-              echo "Coba mirror via curl..."
-              MIRRORS=(
-                "https://raw.githubusercontent.com/5ec1cff/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-                "https://raw.githubusercontent.com/sidrxt/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-                "https://raw.githubusercontent.com/backslashxx/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-              )
-              DOWNLOAD_SUCCESS=0
-              for url in "${MIRRORS[@]}"; do
+              echo "Coba mirror..."
+              for url in \
+                "https://raw.githubusercontent.com/5ec1cff/KernelSU-SUSFS/main/kernel/ksu_susfs.h" \
+                "https://raw.githubusercontent.com/sidrxt/KernelSU-SUSFS/main/kernel/ksu_susfs.h" \
+                "https://raw.githubusercontent.com/backslashxx/KernelSU-SUSFS/main/kernel/ksu_susfs.h"; do
                 if curl -fsSL -o "$HEADER_DEST" "$url"; then
                   echo "Berhasil dari $url"
-                  DOWNLOAD_SUCCESS=1
                   break
-                else
-                  echo "Gagal dari $url"
                 fi
               done
-              if [ $DOWNLOAD_SUCCESS -ne 1 ]; then
-                echo "Gagal semua mirror, buat file kosong (risiko)."
-                touch "$HEADER_DEST"
-              fi
+              [ -f "$HEADER_DEST" ] || { echo "Gagal semua mirror!"; exit 1; }
             fi
           fi
 
           echo "Menyalin patch & include..."
-          cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/fs/* $GITHUB_WORKSPACE/kernel-source/fs/ 2>/dev/null || true
-          cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/include/linux/* $GITHUB_WORKSPACE/kernel-source/include/linux/ 2>/dev/null || true
-          find $GITHUB_WORKSPACE/susfs-source/kernel_patches -name "*.patch" -exec cp {} $GITHUB_WORKSPACE/kernel-source/ \;
+          cp -r susfs-source/kernel_patches/fs/* kernel-source/fs/ 2>/dev/null || true
+          cp -r susfs-source/kernel_patches/include/linux/* kernel-source/include/linux/ 2>/dev/null || true
+          find susfs-source/kernel_patches -name "*.patch" -exec cp {} kernel-source/ \;
 
-          cd $GITHUB_WORKSPACE/kernel-source
+          cd kernel-source
           SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
           echo "Sublevel: 5.10.$SUBLEVEL"
 
-          if [ "$SUBLEVEL" -le "43" ]; then
-            perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
-          fi
-          if [ "$SUBLEVEL" -le "117" ]; then
+          # Workaround untuk sublevel tertentu
+          [ "$SUBLEVEL" -le "43" ] && perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
+          [ "$SUBLEVEL" -le "117" ] && {
             sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c
             perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c
             perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
-          fi
+          }
 
           PATCH_FILE=$(ls 50_*.patch 2>/dev/null | head -n 1)
-          if [ -z "$PATCH_FILE" ]; then
-            echo "Tidak ada patch SUSFS!" && exit 1
-          fi
+          [ -z "$PATCH_FILE" ] && { echo "Tidak ada patch SUSFS!"; exit 1; }
           echo "Menggunakan patch: $PATCH_FILE"
-          patch -p1 < "$PATCH_FILE"
-          if [ $? -ne 0 ]; then
-            echo "Patch gagal! Cek reject file:"
-            find . -name "*.rej" -exec cat {} \;
-            exit 1
-          fi
+          patch -p1 < "$PATCH_FILE" || { echo "Patch gagal!"; find . -name "*.rej" -exec cat {} \;; exit 1; }
 
-          if [ "$SUBLEVEL" -le "209" ]; then
-            sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
-          fi
+          [ "$SUBLEVEL" -le "209" ] && sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
 
-      # ============================================================
-      # STEP 5: Konfigurasi Gaming & Memory (dengan BPF/BTF dimatikan total)
-      # ============================================================
-      - name: 5. Konfigurasi Optimasi Gaming & Memory
+      - name: 5. Konfigurasi Optimasi + Matikan BPF/BTF Total
         run: |
-          echo "=== INSTALL DEPENDENSI & DISABLE BPF ==="
-          sudo apt-get install -y libelf-dev
+          echo "=== KONFIGURASI OPTIMASI & MATIKAN BPF/BTF ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
-          # --- BRUTAL CLEAN: Hapus semua -Werror dan -Werror=... dan pola =... ---
+          # Hapus semua -Werror dan flag bermasalah
           find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i \
-            -e 's/\-Werror\b//g' \
-            -e 's/\-Werror=[^ ]*//g' \
-            -e 's/\-Wstrict-prototypes//g' \
-            -e 's/\-Wimplicit-function-declaration//g' \
-            -e 's/\-Wimplicit-int//g' \
-            -e 's/\-Wreturn-type//g' \
-            -e 's/\-Wdate-time//g' \
-            -e 's/=strict-prototypes//g' \
-            -e 's/=implicit-function-declaration//g' \
-            -e 's/=implicit-int//g' \
-            -e 's/=return-type//g' \
-            -e 's/=date-time//g' \
-            -e 's/=unknown-warning-option//g' \
-            -e 's/\-implicit-function-declaration//g' \
-            -e 's/\-implicit-int//g' \
-            -e 's/\-strict-prototypes//g' \
-            -e 's/\-return-type//g' \
+            -e 's/\-Werror\b//g' -e 's/\-Werror=[^ ]*//g' \
+            -e 's/\-Wstrict-prototypes//g' -e 's/\-Wimplicit-function-declaration//g' \
+            -e 's/\-Wimplicit-int//g' -e 's/\-Wreturn-type//g' -e 's/\-Wdate-time//g' \
+            -e 's/=strict-prototypes//g' -e 's/=implicit-function-declaration//g' \
+            -e 's/=implicit-int//g' -e 's/=return-type//g' -e 's/=date-time//g' \
+            -e 's/=unknown-warning-option//g' -e 's/\-implicit-function-declaration//g' \
+            -e 's/\-implicit-int//g' -e 's/\-strict-prototypes//g' -e 's/\-return-type//g' \
             -e 's/\-date-time//g' {} \;
 
-          # Bersihkan khusus vdso32 Makefile (jika ada)
-          sed -i \
-            -e 's/\-implicit-function-declaration//g' \
-            -e 's/\-Wimplicit-function-declaration//g' \
-            -e 's/\-Werror=implicit-function-declaration//g' \
-            arch/arm64/kernel/vdso32/Makefile 2>/dev/null || true
+          sed -i 's/\-implicit-function-declaration//g' arch/arm64/kernel/vdso32/Makefile 2>/dev/null || true
 
-          # Tambahkan flag aman ke Makefile utama
+          # Tambah flag aman
           echo 'KBUILD_CFLAGS += -Wno-error -Wno-unknown-warning-option -Wno-pointer-sign' >> Makefile
           echo 'HOSTCFLAGS += -Wno-error -Wno-unknown-warning-option -Wno-pointer-sign' >> Makefile
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
 
-          # Hapus seluruh tools/bpf agar resolve_btfids tidak pernah dibangun
+          # Hapus tools/bpf & bersihkan referensi
           rm -rf tools/bpf
-          # Hapus semua referensi resolve_btfids dari Makefile
           sed -i '/resolve_btfids/d' Makefile
           sed -i '/prepare-resolve_btfids/d' Makefile
-          # TAMBAHAN: Override target dengan aturan kosong (biar gak error)
           echo -e "\nprepare-resolve_btfids: ;" >> Makefile
           echo -e "\nresolve_btfids: ;" >> Makefile
 
           # Generate defconfig
           make O=out ARCH=arm64 gki_defconfig
 
-          # Paksa konfigurasi agar tidak mencari BPF
+          # Matikan semua yang berkaitan dengan BPF dan BTF
           ./scripts/config --file out/.config \
-              --disable CONFIG_BPF \
-              --disable CONFIG_BPF_SYSCALL \
-              --disable CONFIG_DEBUG_INFO_BTF \
-              --disable CONFIG_DEBUG_INFO_BTF_MODULES \
-              --disable CONFIG_BPF_EVENTS \
-              --disable CONFIG_HAVE_BPF_JIT
+            --disable CONFIG_BPF \
+            --disable CONFIG_BPF_SYSCALL \
+            --disable CONFIG_DEBUG_INFO_BTF \
+            --disable CONFIG_DEBUG_INFO_BTF_MODULES \
+            --disable CONFIG_BPF_EVENTS \
+            --disable CONFIG_HAVE_BPF_JIT \
+            --disable CONFIG_KVM \
+            --disable CONFIG_ARM64_KVM \
+            --disable CONFIG_VIRTUALIZATION \
+            --disable CONFIG_MODULES \
+            --disable CONFIG_HEADERS_INSTALL \
+            --disable CONFIG_DEBUG_INFO \
+            --disable CONFIG_KASAN \
+            --disable CONFIG_UBSAN \
+            --enable CONFIG_LTO_NONE \
+            --set-val CONFIG_HZ 1000 \
+            --enable CONFIG_HZ_1000 \
+            --enable CONFIG_SCHED_AUTOGROUP \
+            --enable CONFIG_CFS_BANDWIDTH \
+            --enable CONFIG_ENERGY_MODEL \
+            --enable CONFIG_CPU_FREQ_GOV_SCHEDUTIL \
+            --enable CONFIG_CPU_FREQ_GOV_PERFORMANCE \
+            --enable CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
+            --enable CONFIG_ZRAM --set-val CONFIG_ZRAM_DEF_COMP lz4 \
+            --enable CONFIG_ZRAM_DEF_COMP_LZ4 \
+            --enable CONFIG_TRANSPARENT_HUGEPAGE \
+            --enable CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS \
+            --enable CONFIG_CLEANCACHE \
+            --enable CONFIG_FRONTSWAP \
+            --enable CONFIG_COMPACTION \
+            --enable CONFIG_MIGRATION \
+            --enable CONFIG_KSM \
+            --enable CONFIG_LZ4_COMPRESS \
+            --enable CONFIG_LZ4_DECOMPRESS \
+            --enable CONFIG_CRYPTO_LZ4 \
+            --enable CONFIG_CRYPTO_LZ4HC \
+            --disable CONFIG_PANIC_ON_OOPS \
+            --disable CONFIG_SCHED_DEBUG \
+            --disable CONFIG_WERROR \
+            --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE \
+            --set-val CONFIG_LOCALVERSION "-Panxcz-susfs"
 
-          # Set opsi gaming & memory
+          # Aktifkan KSU_SUSFS
           ./scripts/config --file out/.config \
-              --enable CONFIG_HZ_1000 --set-val CONFIG_HZ 1000 \
-              --enable CONFIG_SCHED_AUTOGROUP \
-              --enable CONFIG_CFS_BANDWIDTH \
-              --enable CONFIG_RT_GROUP_SCHED \
-              --enable CONFIG_ENERGY_MODEL \
-              --enable CONFIG_CPU_FREQ_GOV_SCHEDUTIL \
-              --enable CONFIG_CPU_FREQ_GOV_PERFORMANCE \
-              --enable CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
-              --enable CONFIG_CPU_IDLE_GOV_MENU \
-              --enable CONFIG_CPU_IDLE_GOV_TEO \
-              --set-val CONFIG_DEFAULT_MMAP_MIN_ADDR 32768 \
-              --disable CONFIG_COMPAT_VDSO \
-              --disable CONFIG_THUMB2_COMPAT_VDSO \
-              --enable CONFIG_ARM64_PTR_AUTH \
-              --enable CONFIG_ARM64_BTI_KERNEL \
-              --enable CONFIG_ARM64_TLB_RANGE \
-              --enable CONFIG_ARM64_MTE \
-              --disable CONFIG_SHADOW_CALL_STACK \
-              --enable CONFIG_LLVM_POLLY \
-              --disable CONFIG_VIRTUALIZATION \
-              --disable CONFIG_KVM \
-              --disable CONFIG_ARM64_KVM \
-              --disable CONFIG_KVM_ARM_HOST \
-              --disable CONFIG_HAVE_KVM \
-              --disable CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT \
-              --enable CONFIG_ZRAM --set-val CONFIG_ZRAM_DEF_COMP lz4 --enable CONFIG_ZRAM_DEF_COMP_LZ4 \
-              --enable CONFIG_ZSMALLOC \
-              --enable CONFIG_TRANSPARENT_HUGEPAGE \
-              --enable CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS \
-              --enable CONFIG_CLEANCACHE \
-              --enable CONFIG_FRONTSWAP \
-              --enable CONFIG_MEMORY_BALLOON \
-              --enable CONFIG_BALLOON_COMPACTION \
-              --enable CONFIG_COMPACTION \
-              --enable CONFIG_MIGRATION \
-              --enable CONFIG_KSM \
-              --enable CONFIG_LZ4_COMPRESS \
-              --enable CONFIG_LZ4_DECOMPRESS \
-              --enable CONFIG_CRYPTO_LZ4 \
-              --enable CONFIG_CRYPTO_LZ4HC \
-              --disable CONFIG_HEADERS_INSTALL \
-              --disable CONFIG_MODULES \
-              --enable CONFIG_LTO_NONE \
-              --enable CONFIG_RELR \
-              --set-val CONFIG_ARCH_MMAP_RND_BITS 18 \
-              --set-val CONFIG_ARCH_MMAP_RND_COMPAT_BITS 11 \
-              --disable CONFIG_KASAN \
-              --disable CONFIG_UBSAN \
-              --disable CONFIG_DEBUG_INFO \
-              --disable CONFIG_SLUB_DEBUG \
-              --disable CONFIG_PANIC_ON_OOPS \
-              --disable CONFIG_LOCKUP_DETECTOR \
-              --disable CONFIG_SCHED_DEBUG \
-              --disable CONFIG_WERROR \
-              --set-val CONFIG_FRAME_WARN 4096 \
-              --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
-
-          # Nonaktifkan erratum (opsional)
-          for err in 843419 845719 1024718 1418040 1165522 1286807 1463225 1542419 1508412 2054223 2067961 2077057 2081180 2139208 2441009 2457168 2645198; do
-            ./scripts/config --file out/.config --disable CONFIG_ARM64_ERRATUM_$err
-          done
-
-          # Aktifkan SUSFS
-          ./scripts/config --file out/.config \
-              --enable CONFIG_KSU_SUSFS \
-              --enable CONFIG_KSU_SUSFS_SUS_PATH \
-              --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
-              --enable CONFIG_KSU_SUSFS_SUS_KSTAT \
-              --enable CONFIG_KSU_SUSFS_SPOOF_UNAME \
-              --disable CONFIG_KSU_SUSFS_ENABLE_LOG \
-              --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
-              --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
-              --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT \
-              --enable CONFIG_KSU_SUSFS_SUS_MAP \
-              --set-val CONFIG_LOCALVERSION "-Panxcz-susfs"
+            --enable CONFIG_KSU_SUSFS \
+            --enable CONFIG_KSU_SUSFS_SUS_PATH \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
+            --enable CONFIG_KSU_SUSFS_SUS_KSTAT \
+            --enable CONFIG_KSU_SUSFS_SPOOF_UNAME \
+            --disable CONFIG_KSU_SUSFS_ENABLE_LOG \
+            --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+            --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+            --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT \
+            --enable CONFIG_KSU_SUSFS_SUS_MAP
 
           make O=out ARCH=arm64 olddefconfig
 
-          # Paksa BTF mati di .config setelah olddefconfig (jaga-jaga)
-          sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/' out/.config
-          sed -i 's/CONFIG_DEBUG_INFO_BTF_MODULES=y/CONFIG_DEBUG_INFO_BTF_MODULES=n/' out/.config
+          # Paksa BTF mati (jaga-jaga)
+          sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/g' out/.config
+          sed -i 's/CONFIG_BPF=y/CONFIG_BPF=n/g' out/.config
           make O=out ARCH=arm64 olddefconfig
 
-      # ============================================================
-      # STEP 6: Build kernel (Image & vmlinux) dengan SKIP_BTF
-      # ============================================================
-      - name: 6. Build vmlinux & Image
+      - name: 6. Build Kernel (Image + vmlinux)
         run: |
-          echo "=== BUILD KERNEL ==="
+          echo "=== MULAI BUILD ==="
           cd $GITHUB_WORKSPACE/kernel-source
-          export PATH="/usr/lib/llvm-22/bin:$PATH"
-
-          # Ekspor SKIP_BTF agar skrip tidak memanggil resolve_btfids
+          export PATH="/usr/lib/llvm-20/bin:$PATH"
           export SKIP_BTF=1
 
           make -j$(nproc --all) O=out ARCH=arm64 \
@@ -304,55 +228,37 @@ jobs:
             LLVM=1 LLVM_IAS=1 \
             SKIP_BTF=1 \
             KCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign" \
-            vmlinux Image 2>&1 | tee build.log
+            Image vmlinux 2>&1 | tee build.log
 
-          # Cek hasil
           if [ ! -f out/arch/arm64/boot/Image ]; then
-            echo "Image gagal dibuild! Cek log di bawah:"
+            echo "=== BUILD GAGAL ==="
             tail -n 200 build.log
             exit 1
           fi
-          echo "Image berhasil dibuild!"
+          echo "=== BUILD SUKSES ==="
 
-      # ============================================================
-      # STEP 7: Simpan build.log sebagai artifact
-      # ============================================================
-      - name: 7. Simpan build.log sebagai artifact (untuk debugging)
+      - name: 7. Simpan build.log
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
+          name: build-log-${{ github.event.inputs.variant }}
           path: kernel-source/build.log
         if: always()
 
-      # ============================================================
-      # STEP 8: Packing AnyKernel3
-      # ============================================================
-      - name: 8. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
+      - name: 8. Packing AnyKernel3
         run: |
-          echo "=== PACKING ZIP INSTALASI ==="
+          echo "=== PACKING ZIP ==="
           cd $GITHUB_WORKSPACE
           git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
-
-          if [ -f kernel-source/out/arch/arm64/boot/Image ]; then
-            cp kernel-source/out/arch/arm64/boot/Image AK3/
-            echo "Image berhasil disalin!"
-          else
-            echo "Image tidak ditemukan!" && exit 1
-          fi
-
+          cp kernel-source/out/arch/arm64/boot/Image AK3/
           cd AK3
           sed -i 's|block=.*|block=/dev/block/by-name/boot;|g' anykernel.sh
           sed -i 's|is_slot_device=.*|is_slot_device=auto;|g' anykernel.sh
           echo 'partition_list="boot_a boot_b boot dtbo_a dtbo_b";' >> anykernel.sh
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+          zip -r9 ../Panxcz_kernel_susfs_${{ github.event.inputs.variant }}.zip *
 
-          zip -r9 ../Panxcz_kernel_susfs.zip *
-
-      # ============================================================
-      # STEP 9: Upload hasil zip
-      # ============================================================
-      - name: 9. Mengunggah Hasil Build Jadi
+      - name: 9. Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Panxcz_kernel_susfs
-          path: Panxcz_kernel_susfs.zip
+          name: Panxcz_kernel_susfs_${{ github.event.inputs.variant }}
+          path: Panxcz_kernel_susfs_${{ github.event.inputs.variant }}.zip
