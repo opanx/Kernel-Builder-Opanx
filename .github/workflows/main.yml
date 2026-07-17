@@ -13,7 +13,7 @@ jobs:
         run: |
           echo "=== MEMULAI SETUP ENVIRONMENT ==="
           sudo apt-get update
-          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg
+          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg libelf-dev
 
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -125,7 +125,7 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + matikan KVM & verifikasi)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + matikan KVM & BTF)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
           cd $GITHUB_WORKSPACE/kernel-source
@@ -195,6 +195,8 @@ jobs:
           ../scripts/config --disable CONFIG_KVM_ARM_HOST
           ../scripts/config --disable CONFIG_HAVE_KVM
           ../scripts/config --disable CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT
+          # Matikan BTF (BPF Type Format)
+          ../scripts/config --disable CONFIG_DEBUG_INFO_BTF
           # Matikan semua debug & KASAN/UBSAN
           ../scripts/config --disable CONFIG_KASAN
           ../scripts/config --disable CONFIG_UBSAN
@@ -252,14 +254,18 @@ jobs:
           # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-          # Verifikasi & paksa KVM mati
-          echo "=== CEK KONFIGURASI KVM ==="
-          grep CONFIG_KVM out/.config || true
+          # Verifikasi & paksa KVM & BTF mati
+          echo "=== CEK KONFIGURASI KVM & BTF ==="
+          grep -E "CONFIG_KVM|CONFIG_DEBUG_INFO_BTF" out/.config || true
           if grep -q "CONFIG_KVM=y" out/.config; then
             echo "!!! KVM masih aktif, paksa disable !!!"
             sed -i 's/CONFIG_KVM=y/CONFIG_KVM=n/' out/.config
-            make O=out ARCH=arm64 olddefconfig
           fi
+          if grep -q "CONFIG_DEBUG_INFO_BTF=y" out/.config; then
+            echo "!!! BTF masih aktif, paksa disable !!!"
+            sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/' out/.config
+          fi
+          make O=out ARCH=arm64 olddefconfig
 
       - name: 6. Build vmlinux & Image (Verbose + Single-thread + clean out)
         run: |
