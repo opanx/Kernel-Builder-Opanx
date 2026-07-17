@@ -125,7 +125,7 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + matikan debug)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX + matikan KVM & verifikasi)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
           cd $GITHUB_WORKSPACE/kernel-source
@@ -188,6 +188,13 @@ jobs:
           ../scripts/config --enable CONFIG_ARM64_MTE
           ../scripts/config --disable CONFIG_SHADOW_CALL_STACK
           ../scripts/config --enable CONFIG_LLVM_POLLY
+          # Matikan KVM & virtualization total
+          ../scripts/config --disable CONFIG_VIRTUALIZATION
+          ../scripts/config --disable CONFIG_KVM
+          ../scripts/config --disable CONFIG_ARM64_KVM
+          ../scripts/config --disable CONFIG_KVM_ARM_HOST
+          ../scripts/config --disable CONFIG_HAVE_KVM
+          ../scripts/config --disable CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT
           # Matikan semua debug & KASAN/UBSAN
           ../scripts/config --disable CONFIG_KASAN
           ../scripts/config --disable CONFIG_UBSAN
@@ -245,12 +252,24 @@ jobs:
           # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 6. Build vmlinux & Image (Verbose + Single-thread)
+          # Verifikasi & paksa KVM mati
+          echo "=== CEK KONFIGURASI KVM ==="
+          grep CONFIG_KVM out/.config || true
+          if grep -q "CONFIG_KVM=y" out/.config; then
+            echo "!!! KVM masih aktif, paksa disable !!!"
+            sed -i 's/CONFIG_KVM=y/CONFIG_KVM=n/' out/.config
+            make O=out ARCH=arm64 olddefconfig
+          fi
+
+      - name: 6. Build vmlinux & Image (Verbose + Single-thread + clean out)
         run: |
           set -o pipefail
-          echo "=== BUILD vmlinux & Image (VERBOSE) ==="
+          echo "=== BUILD vmlinux & Image (VERBOSE + CLEAN) ==="
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
+
+          # Bersihkan out directory untuk fresh build
+          rm -rf out
 
           export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3"
           export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time"
@@ -262,6 +281,9 @@ jobs:
             find . -name "*.rej" -exec cat {} \;
             exit 1
           fi
+
+          # Generate ulang config agar out directory baru pakai config yang sudah diset
+          make O=out ARCH=arm64 olddefconfig
 
           # Build vmlinux dulu (single-thread, verbose) agar error link jelas
           make -j1 O=out ARCH=arm64 \
