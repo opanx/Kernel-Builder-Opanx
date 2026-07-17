@@ -30,7 +30,6 @@ jobs:
           sudo ln -sf "$LLVM_BIN_PATH/llvm-readelf" /usr/bin/llvm-readelf
 
           echo "$LLVM_BIN_PATH" >> $GITHUB_PATH
-
           echo "=== VERIFIKASI COMPILER ==="
           clang --version
 
@@ -42,7 +41,7 @@ jobs:
           cd kernel-source
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 258/' Makefile
           sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -Panxcz-gaming/' Makefile
-          echo "Versi kernel sekarang: $(make kernelversion 2>/dev/null || cat Makefile | grep -E '^VERSION|^PATCHLEVEL|^SUBLEVEL|^EXTRAVERSION' | tr '\n' ' ')"
+          echo "Versi kernel: $(make kernelversion 2>/dev/null || cat Makefile | grep -E '^VERSION|^PATCHLEVEL|^SUBLEVEL|^EXTRAVERSION' | tr '\n' ' ')"
 
       - name: 3. Suntik ReSukiSU Core
         run: |
@@ -50,29 +49,26 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel-source
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-      - name: 4. Integrasi SUSFS v2.2.0 (dengan fallback header)
+      - name: 4. Integrasi SUSFS v2.2.0 (dengan patch wajib berhasil)
         run: |
           echo "=== INTEGRASI SUSFS v2.2.0 ==="
           cd $GITHUB_WORKSPACE
 
-          # Clone susfs4ksu branch gki-android12-5.10
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
 
-          # Tentukan lokasi tujuan header
           HEADER_DEST="$GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h"
           mkdir -p "$(dirname "$HEADER_DEST")"
 
-          # 1. Coba ambil dari KernelSU (hasil step 3)
           if [ -f "$HEADER_DEST" ]; then
-            echo "ksu_susfs.h sudah ada dari ReSukiSU, skip."
+            echo "ksu_susfs.h sudah ada dari ReSukiSU."
           else
-            echo "ksu_susfs.h belum ada, mencari dari susfs-source..."
+            echo "Mencari ksu_susfs.h dari susfs-source..."
             SUSFS_HEADER=$(find $GITHUB_WORKSPACE/susfs-source -name "ksu_susfs.h" | head -n 1)
             if [ -n "$SUSFS_HEADER" ]; then
               cp "$SUSFS_HEADER" "$HEADER_DEST"
-              echo "ksu_susfs.h berhasil disalin dari repositori lokal!"
+              echo "Berhasil disalin!"
             else
-              echo "Tidak ditemukan di susfs-source, coba mirror via curl..."
+              echo "Coba mirror via curl..."
               MIRRORS=(
                 "https://raw.githubusercontent.com/5ec1cff/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
                 "https://raw.githubusercontent.com/sidrxt/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
@@ -81,31 +77,30 @@ jobs:
               DOWNLOAD_SUCCESS=0
               for url in "${MIRRORS[@]}"; do
                 if curl -fsSL -o "$HEADER_DEST" "$url"; then
-                  echo "ksu_susfs.h berhasil diunduh dari $url"
+                  echo "Berhasil dari $url"
                   DOWNLOAD_SUCCESS=1
                   break
                 else
-                  echo "Gagal dari $url, coba berikutnya..."
+                  echo "Gagal dari $url"
                 fi
               done
               if [ $DOWNLOAD_SUCCESS -ne 1 ]; then
-                echo "Semua mirror gagal, buat file kosong (risiko kompilasi)."
+                echo "Gagal semua mirror, buat file kosong (risiko)."
                 touch "$HEADER_DEST"
               fi
             fi
           fi
 
-          # Salin semua file patch dan include dari susfs-source
-          echo "Menyalin kernel patches..."
+          echo "Menyalin patch & include..."
           cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/fs/* $GITHUB_WORKSPACE/kernel-source/fs/ 2>/dev/null || true
           cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/include/linux/* $GITHUB_WORKSPACE/kernel-source/include/linux/ 2>/dev/null || true
           find $GITHUB_WORKSPACE/susfs-source/kernel_patches -name "*.patch" -exec cp {} $GITHUB_WORKSPACE/kernel-source/ \;
 
           cd $GITHUB_WORKSPACE/kernel-source
           SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
-          echo "Sublevel kernel: 5.10.$SUBLEVEL"
+          echo "Sublevel: 5.10.$SUBLEVEL"
 
-          # Workaround untuk sublevel kecil
+          # Workaround untuk sublevel tertentu
           if [ "$SUBLEVEL" -le "43" ]; then
             perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
           fi
@@ -115,16 +110,19 @@ jobs:
             perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
           fi
 
-          # Apply patch utama (cari yang 50_*.patch)
+          # Patch utama WAJIB BERHASIL (tanpa || true)
           PATCH_FILE=$(ls 50_*.patch 2>/dev/null | head -n 1)
-          if [ -n "$PATCH_FILE" ]; then
-            echo "Mengeksekusi patch $PATCH_FILE ..."
-            patch -p1 --forward --reject-file=- < "$PATCH_FILE" || true
-          else
-            echo "Tidak ada patch SUSFS ditemukan!" && exit 1
+          if [ -z "$PATCH_FILE" ]; then
+            echo "Tidak ada patch SUSFS!" && exit 1
+          fi
+          echo "Menggunakan patch: $PATCH_FILE"
+          patch -p1 < "$PATCH_FILE"
+          if [ $? -ne 0 ]; then
+            echo "Patch gagal! Cek reject file:"
+            find . -name "*.rej" -exec cat {} \;
+            exit 1
           fi
 
-          # Perbaikan show_pad untuk sublevel <= 209
           if [ "$SUBLEVEL" -le "209" ]; then
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
@@ -134,10 +132,8 @@ jobs:
           echo "=== SUNTIK OPTIMASI GAME & MEMORY ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
-          # Hapus -Werror di seluruh Makefile/Kbuild
           find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
 
-          # Tambahkan konfigurasi ke gki_defconfig
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           # ===== OPTIMASI GAMING =====
           CONFIG_HZ_1000=y
@@ -184,11 +180,12 @@ jobs:
           CONFIG_COMPACTION=y
           CONFIG_MIGRATION=y
           CONFIG_KSM=y
-          CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
           CONFIG_LZ4_COMPRESS=y
           CONFIG_LZ4_DECOMPRESS=y
           CONFIG_CRYPTO_LZ4=y
           CONFIG_CRYPTO_LZ4HC=y
+          # ===== MATIKAN HEADERS_INSTALL (Biar gak error HDRINST) =====
+          CONFIG_HEADERS_INSTALL=n
           # ===== OVERHEAD DEBUG DI NONAKTIFKAN =====
           # CONFIG_DEBUG_INFO is not set
           CONFIG_DEBUG_INFO_REDUCED=n
@@ -201,7 +198,6 @@ jobs:
           CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
           EOF
 
-          # Tambahkan flag optimasi Clang
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
 
       - name: 6. Proses Kompilasi Kernel (Clang 19)
@@ -210,7 +206,7 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-19/bin:$PATH"
 
-          # Tambahkan konfigurasi SUSFS ke defconfig
+          # Tambahkan konfigurasi SUSFS
           {
             echo "CONFIG_KSU_SUSFS=y"
             echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
@@ -228,11 +224,14 @@ jobs:
           make O=out ARCH=arm64 gki_defconfig
           make O=out ARCH=arm64 olddefconfig
 
+          # Build Image dan modules saja (hindari headers_install)
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1
+            LLVM=1 LLVM_IAS=1 \
+            KCFLAGS="-Wno-error" \
+            Image modules
 
       - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
         run: |
@@ -242,9 +241,9 @@ jobs:
 
           if [ -f kernel-source/out/arch/arm64/boot/Image ]; then
             cp kernel-source/out/arch/arm64/boot/Image AK3/
-            echo "Berkas Image kernel berhasil disalin!"
+            echo "Image berhasil disalin!"
           else
-            echo "Error: Berkas Image tidak ditemukan!" && exit 1
+            echo "Image tidak ditemukan!" && exit 1
           fi
 
           cd AK3
