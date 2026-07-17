@@ -147,10 +147,13 @@ jobs:
           rm -rf tools/bpf
           find . -name "Makefile" -exec sed -i '/resolve_btfids/d' {} \;
           find . -name "Makefile" -exec sed -i '/prepare-resolve_btfids/d' {} \;
+
           echo -e "\nprepare-resolve_btfids: ;" >> Makefile
           echo -e "\nresolve_btfids: ;" >> Makefile
           echo -e "\nprepare-resolve_btfids: ;" >> arch/arm64/Makefile 2>/dev/null || true
           echo -e "\nresolve_btfids: ;" >> arch/arm64/Makefile 2>/dev/null || true
+          # Tambahkan juga di scripts/Makefile.build (tempat target mungkin dipanggil)
+          echo -e "\nprepare-resolve_btfids: ;" >> scripts/Makefile.build 2>/dev/null || true
 
           make O=out ARCH=arm64 gki_defconfig
 
