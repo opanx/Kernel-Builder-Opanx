@@ -1,0 +1,11 @@
+--- a/arch/arm64/kvm/hyp/vhe/sysreg-sr.c
++++ b/arch/arm64/kvm/hyp/vhe/sysreg-sr.c
+@@ -4,7 +4,7 @@
+  * Copyright (C) 2021 - Google LLC
+  */
+ 
+-#include <hyp/sysreg-sr.h>
++#include "../sysreg-sr.h"
+ 
+ /*
+  * We all agreed to move the __kvm_hyp_sysreg_save_common_vhe and
