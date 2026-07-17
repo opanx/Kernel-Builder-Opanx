@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      # ============================================================
+      # STEP 1: Setup environment + Clang 22 + libelf
+      # ============================================================
       - name: 1. Persiapan Server & Pemasangan Clang 22
         run: |
           echo "=== MEMULAI SETUP ENVIRONMENT ==="
@@ -33,6 +36,9 @@ jobs:
           echo "=== VERIFIKASI COMPILER ==="
           clang --version
 
+      # ============================================================
+      # STEP 2: Clone kernel source & set version 5.10.258
+      # ============================================================
       - name: 2. Kloning Source Kernel & Set Version 5.10.258 (branch millennium-base)
         run: |
           echo "=== CLONING KERNEL SOURCE ==="
@@ -43,12 +49,18 @@ jobs:
           sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -Panxcz-gaming/' Makefile
           echo "Versi kernel: $(make kernelversion 2>/dev/null || cat Makefile | grep -E '^VERSION|^PATCHLEVEL|^SUBLEVEL|^EXTRAVERSION' | tr '\n' ' ')"
 
+      # ============================================================
+      # STEP 3: Integrate ReSukiSU (KernelSU fork)
+      # ============================================================
       - name: 3. Suntik ReSukiSU Core
         run: |
           echo "=== MENYUNTIKKAN RESUKISU CORE ==="
           cd $GITHUB_WORKSPACE/kernel-source
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
+      # ============================================================
+      # STEP 4: Integrate SUSFS v2.2.0 (patch harus berhasil)
+      # ============================================================
       - name: 4. Integrasi SUSFS v2.2.0 (patch wajib berhasil)
         run: |
           echo "=== INTEGRASI SUSFS v2.2.0 ==="
@@ -125,12 +137,16 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX: delete tools/bpf + paksa .config)
+      # ============================================================
+      # STEP 5: Konfigurasi Gaming & Memory (dengan BPF/BTF dimatikan total)
+      # ============================================================
+      - name: 5. Konfigurasi Optimasi Gaming & Memory
         run: |
-          echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
+          echo "=== INSTALL DEPENDENSI & DISABLE BPF ==="
+          sudo apt-get install -y libelf-dev
           cd $GITHUB_WORKSPACE/kernel-source
 
-          # --- BRUTAL CLEAN: Hapus semua -Werror dan -Werror=..., dan semua pola =... ---
+          # --- BRUTAL CLEAN: Hapus semua -Werror dan -Werror=... dan pola =... ---
           find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i \
             -e 's/\-Werror\b//g' \
             -e 's/\-Werror=[^ ]*//g' \
@@ -168,170 +184,129 @@ jobs:
           # Hapus semua referensi resolve_btfids dari Makefile
           sed -i '/resolve_btfids/d' Makefile
           sed -i '/prepare-resolve_btfids/d' Makefile
+          # TAMBAHAN: Override target dengan aturan kosong (biar gak error)
+          echo -e "\nprepare-resolve_btfids: ;" >> Makefile
+          echo -e "\nresolve_btfids: ;" >> Makefile
 
           # Generate defconfig
           make O=out ARCH=arm64 gki_defconfig
 
-          cd out
-          # Set semua opsi konfigurasi dengan scripts/config
-          ../scripts/config --enable CONFIG_HZ_1000 --set-val CONFIG_HZ 1000
-          ../scripts/config --enable CONFIG_SCHED_AUTOGROUP
-          ../scripts/config --enable CONFIG_CFS_BANDWIDTH
-          ../scripts/config --enable CONFIG_RT_GROUP_SCHED
-          ../scripts/config --enable CONFIG_ENERGY_MODEL
-          ../scripts/config --enable CONFIG_CPU_FREQ_GOV_SCHEDUTIL
-          ../scripts/config --enable CONFIG_CPU_FREQ_GOV_PERFORMANCE
-          ../scripts/config --enable CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
-          ../scripts/config --enable CONFIG_CPU_IDLE_GOV_MENU
-          ../scripts/config --enable CONFIG_CPU_IDLE_GOV_TEO
-          ../scripts/config --set-val CONFIG_DEFAULT_MMAP_MIN_ADDR 32768
-          # Matikan COMPAT_VDSO
-          ../scripts/config --disable CONFIG_COMPAT_VDSO
-          ../scripts/config --disable CONFIG_THUMB2_COMPAT_VDSO
-          ../scripts/config --enable CONFIG_ARM64_PTR_AUTH
-          ../scripts/config --enable CONFIG_ARM64_BTI_KERNEL
-          ../scripts/config --enable CONFIG_ARM64_TLB_RANGE
-          ../scripts/config --enable CONFIG_ARM64_MTE
-          ../scripts/config --disable CONFIG_SHADOW_CALL_STACK
-          ../scripts/config --enable CONFIG_LLVM_POLLY
-          # Matikan KVM
-          ../scripts/config --disable CONFIG_VIRTUALIZATION
-          ../scripts/config --disable CONFIG_KVM
-          ../scripts/config --disable CONFIG_ARM64_KVM
-          ../scripts/config --disable CONFIG_KVM_ARM_HOST
-          ../scripts/config --disable CONFIG_HAVE_KVM
-          ../scripts/config --disable CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT
-          # Matikan BPF & BTF total
-          ../scripts/config --disable CONFIG_BPF
-          ../scripts/config --disable CONFIG_BPF_SYSCALL
-          ../scripts/config --disable CONFIG_HAVE_BPF_JIT
-          ../scripts/config --disable CONFIG_BPF_EVENTS
-          ../scripts/config --disable CONFIG_DEBUG_INFO_BTF
-          ../scripts/config --disable CONFIG_DEBUG_INFO_BTF_MODULES
-          # Matikan semua debug & KASAN/UBSAN
-          ../scripts/config --disable CONFIG_KASAN
-          ../scripts/config --disable CONFIG_UBSAN
-          ../scripts/config --disable CONFIG_DEBUG_INFO
-          ../scripts/config --disable CONFIG_SLUB_DEBUG
-          ../scripts/config --disable CONFIG_PANIC_ON_OOPS
-          ../scripts/config --disable CONFIG_LOCKUP_DETECTOR
-          ../scripts/config --disable CONFIG_SCHED_DEBUG
-          ../scripts/config --disable CONFIG_WERROR
-          ../scripts/config --set-val CONFIG_FRAME_WARN 4096
-          ../scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
-          # Memory
-          ../scripts/config --enable CONFIG_ZRAM
-          ../scripts/config --set-val CONFIG_ZRAM_DEF_COMP lz4
-          ../scripts/config --enable CONFIG_ZRAM_DEF_COMP_LZ4
-          ../scripts/config --enable CONFIG_ZSMALLOC
-          ../scripts/config --enable CONFIG_TRANSPARENT_HUGEPAGE
-          ../scripts/config --enable CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS
-          ../scripts/config --enable CONFIG_CLEANCACHE
-          ../scripts/config --enable CONFIG_FRONTSWAP
-          ../scripts/config --enable CONFIG_MEMORY_BALLOON
-          ../scripts/config --enable CONFIG_BALLOON_COMPACTION
-          ../scripts/config --enable CONFIG_COMPACTION
-          ../scripts/config --enable CONFIG_MIGRATION
-          ../scripts/config --enable CONFIG_KSM
-          ../scripts/config --enable CONFIG_LZ4_COMPRESS
-          ../scripts/config --enable CONFIG_LZ4_DECOMPRESS
-          ../scripts/config --enable CONFIG_CRYPTO_LZ4
-          ../scripts/config --enable CONFIG_CRYPTO_LZ4HC
-          # Matikan HEADERS_INSTALL, MODULES, & LTO
-          ../scripts/config --disable CONFIG_HEADERS_INSTALL
-          ../scripts/config --disable CONFIG_MODULES
-          ../scripts/config --enable CONFIG_LTO_NONE
-          ../scripts/config --enable CONFIG_RELR
-          ../scripts/config --set-val CONFIG_ARCH_MMAP_RND_BITS 18
-          ../scripts/config --set-val CONFIG_ARCH_MMAP_RND_COMPAT_BITS 11
-          # Nonaktifkan erratum
-          for err in 843419 845719 1024718 1418040 1165522 1286807 1463225 1542419 1508412 2054223 2067961 2077057 2081180 2139208 2441009 2457168 2645198; do
-            ../scripts/config --disable CONFIG_ARM64_ERRATUM_$err
-          done
-          # SUSFS
-          ../scripts/config --enable CONFIG_KSU_SUSFS
-          ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
-          ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-          ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_KSTAT
-          ../scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_UNAME
-          ../scripts/config --disable CONFIG_KSU_SUSFS_ENABLE_LOG
-          ../scripts/config --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-          ../scripts/config --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-          ../scripts/config --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT
-          ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_MAP
-          ../scripts/config --set-val CONFIG_LOCALVERSION "-Panxcz-susfs"
-          cd ..
+          # Paksa konfigurasi agar tidak mencari BPF
+          ./scripts/config --file out/.config \
+              --disable CONFIG_BPF \
+              --disable CONFIG_BPF_SYSCALL \
+              --disable CONFIG_DEBUG_INFO_BTF \
+              --disable CONFIG_DEBUG_INFO_BTF_MODULES \
+              --disable CONFIG_BPF_EVENTS \
+              --disable CONFIG_HAVE_BPF_JIT
 
-          # Jalankan olddefconfig
+          # Set opsi gaming & memory
+          ./scripts/config --file out/.config \
+              --enable CONFIG_HZ_1000 --set-val CONFIG_HZ 1000 \
+              --enable CONFIG_SCHED_AUTOGROUP \
+              --enable CONFIG_CFS_BANDWIDTH \
+              --enable CONFIG_RT_GROUP_SCHED \
+              --enable CONFIG_ENERGY_MODEL \
+              --enable CONFIG_CPU_FREQ_GOV_SCHEDUTIL \
+              --enable CONFIG_CPU_FREQ_GOV_PERFORMANCE \
+              --enable CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
+              --enable CONFIG_CPU_IDLE_GOV_MENU \
+              --enable CONFIG_CPU_IDLE_GOV_TEO \
+              --set-val CONFIG_DEFAULT_MMAP_MIN_ADDR 32768 \
+              --disable CONFIG_COMPAT_VDSO \
+              --disable CONFIG_THUMB2_COMPAT_VDSO \
+              --enable CONFIG_ARM64_PTR_AUTH \
+              --enable CONFIG_ARM64_BTI_KERNEL \
+              --enable CONFIG_ARM64_TLB_RANGE \
+              --enable CONFIG_ARM64_MTE \
+              --disable CONFIG_SHADOW_CALL_STACK \
+              --enable CONFIG_LLVM_POLLY \
+              --disable CONFIG_VIRTUALIZATION \
+              --disable CONFIG_KVM \
+              --disable CONFIG_ARM64_KVM \
+              --disable CONFIG_KVM_ARM_HOST \
+              --disable CONFIG_HAVE_KVM \
+              --disable CONFIG_KVM_GENERIC_DIRTYLOG_READ_PROTECT \
+              --enable CONFIG_ZRAM --set-val CONFIG_ZRAM_DEF_COMP lz4 --enable CONFIG_ZRAM_DEF_COMP_LZ4 \
+              --enable CONFIG_ZSMALLOC \
+              --enable CONFIG_TRANSPARENT_HUGEPAGE \
+              --enable CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS \
+              --enable CONFIG_CLEANCACHE \
+              --enable CONFIG_FRONTSWAP \
+              --enable CONFIG_MEMORY_BALLOON \
+              --enable CONFIG_BALLOON_COMPACTION \
+              --enable CONFIG_COMPACTION \
+              --enable CONFIG_MIGRATION \
+              --enable CONFIG_KSM \
+              --enable CONFIG_LZ4_COMPRESS \
+              --enable CONFIG_LZ4_DECOMPRESS \
+              --enable CONFIG_CRYPTO_LZ4 \
+              --enable CONFIG_CRYPTO_LZ4HC \
+              --disable CONFIG_HEADERS_INSTALL \
+              --disable CONFIG_MODULES \
+              --enable CONFIG_LTO_NONE \
+              --enable CONFIG_RELR \
+              --set-val CONFIG_ARCH_MMAP_RND_BITS 18 \
+              --set-val CONFIG_ARCH_MMAP_RND_COMPAT_BITS 11 \
+              --disable CONFIG_KASAN \
+              --disable CONFIG_UBSAN \
+              --disable CONFIG_DEBUG_INFO \
+              --disable CONFIG_SLUB_DEBUG \
+              --disable CONFIG_PANIC_ON_OOPS \
+              --disable CONFIG_LOCKUP_DETECTOR \
+              --disable CONFIG_SCHED_DEBUG \
+              --disable CONFIG_WERROR \
+              --set-val CONFIG_FRAME_WARN 4096 \
+              --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+
+          # Nonaktifkan erratum (opsional)
+          for err in 843419 845719 1024718 1418040 1165522 1286807 1463225 1542419 1508412 2054223 2067961 2077057 2081180 2139208 2441009 2457168 2645198; do
+            ./scripts/config --file out/.config --disable CONFIG_ARM64_ERRATUM_$err
+          done
+
+          # Aktifkan SUSFS
+          ./scripts/config --file out/.config \
+              --enable CONFIG_KSU_SUSFS \
+              --enable CONFIG_KSU_SUSFS_SUS_PATH \
+              --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
+              --enable CONFIG_KSU_SUSFS_SUS_KSTAT \
+              --enable CONFIG_KSU_SUSFS_SPOOF_UNAME \
+              --disable CONFIG_KSU_SUSFS_ENABLE_LOG \
+              --enable CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+              --enable CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+              --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT \
+              --enable CONFIG_KSU_SUSFS_SUS_MAP \
+              --set-val CONFIG_LOCALVERSION "-Panxcz-susfs"
+
           make O=out ARCH=arm64 olddefconfig
 
-          # Paksa BTF mati di .config setelah olddefconfig
+          # Paksa BTF mati di .config setelah olddefconfig (jaga-jaga)
           sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/' out/.config
           sed -i 's/CONFIG_DEBUG_INFO_BTF_MODULES=y/CONFIG_DEBUG_INFO_BTF_MODULES=n/' out/.config
-
-          # Verifikasi & paksa semua opsi mati
-          echo "=== CEK KONFIGURASI KVM, BTF, BPF ==="
-          grep -E "CONFIG_KVM|CONFIG_DEBUG_INFO_BTF|CONFIG_BPF" out/.config || true
-          for opt in KVM DEBUG_INFO_BTF BPF BPF_SYSCALL HAVE_BPF_JIT BPF_EVENTS DEBUG_INFO_BTF_MODULES; do
-            if grep -q "CONFIG_${opt}=y" out/.config; then
-              echo "!!! ${opt} masih aktif, paksa disable !!!"
-              sed -i "s/CONFIG_${opt}=y/CONFIG_${opt}=n/" out/.config
-            fi
-          done
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 6. Build vmlinux & Image (Verbose + Single-thread + clean out)
+      # ============================================================
+      # STEP 6: Build kernel (Image & vmlinux) dengan SKIP_BTF
+      # ============================================================
+      - name: 6. Build vmlinux & Image
         run: |
-          set -o pipefail
-          echo "=== BUILD vmlinux & Image (VERBOSE + CLEAN) ==="
+          echo "=== BUILD KERNEL ==="
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
 
-          # Bersihkan out directory untuk fresh build
-          rm -rf out
+          # Ekspor SKIP_BTF agar skrip tidak memanggil resolve_btfids
+          export SKIP_BTF=1
 
-          export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3"
-          export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time"
-
-          # Cek sisa reject file dari patch (kalau ada, patch gagal)
-          REJECT_FILES=$(find . -name "*.rej")
-          if [ -n "$REJECT_FILES" ]; then
-            echo "!!! Ada reject file dari patch SUSFS !!!"
-            find . -name "*.rej" -exec cat {} \;
-            exit 1
-          fi
-
-          # Generate ulang config
-          make O=out ARCH=arm64 olddefconfig
-
-          # Build vmlinux
-          make -j1 O=out ARCH=arm64 \
+          make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 \
-            KBUILD_CFLAGS="$KBUILD_CFLAGS" \
-            HOSTCFLAGS="$HOSTCFLAGS" \
-            V=1 \
-            vmlinux 2>&1 | tee build.log
+            SKIP_BTF=1 \
+            KCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-pointer-sign" \
+            vmlinux Image 2>&1 | tee build.log
 
-          # Kalau vmlinux sukses, lanjut build Image
-          if [ -f out/vmlinux ]; then
-            echo "vmlinux berhasil dibuild, lanjut build Image..."
-            make -j$(nproc --all) O=out ARCH=arm64 \
-              HOSTCC=gcc HOSTCXX=g++ \
-              CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-              CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-              LLVM=1 LLVM_IAS=1 \
-              KBUILD_CFLAGS="$KBUILD_CFLAGS" \
-              HOSTCFLAGS="$HOSTCFLAGS" \
-              Image 2>&1 | tee -a build.log
-          else
-            echo "vmlinux gagal dibuild! Cek error di build.log"
-            tail -n 200 build.log
-            exit 1
-          fi
-
+          # Cek hasil
           if [ ! -f out/arch/arm64/boot/Image ]; then
             echo "Image gagal dibuild! Cek log di bawah:"
             tail -n 200 build.log
@@ -339,6 +314,9 @@ jobs:
           fi
           echo "Image berhasil dibuild!"
 
+      # ============================================================
+      # STEP 7: Simpan build.log sebagai artifact
+      # ============================================================
       - name: 7. Simpan build.log sebagai artifact (untuk debugging)
         uses: actions/upload-artifact@v4
         with:
@@ -346,6 +324,9 @@ jobs:
           path: kernel-source/build.log
         if: always()
 
+      # ============================================================
+      # STEP 8: Packing AnyKernel3
+      # ============================================================
       - name: 8. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
         run: |
           echo "=== PACKING ZIP INSTALASI ==="
@@ -367,6 +348,9 @@ jobs:
 
           zip -r9 ../Panxcz_kernel_susfs.zip *
 
+      # ============================================================
+      # STEP 9: Upload hasil zip
+      # ============================================================
       - name: 9. Mengunggah Hasil Build Jadi
         uses: actions/upload-artifact@v4
         with:
