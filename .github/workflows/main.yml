@@ -33,10 +33,10 @@ jobs:
           echo "=== VERIFIKASI COMPILER ==="
           clang --version
 
-      - name: 2. Kloning Source Kernel & Set Version 5.10.258
+      - name: 2. Kloning Source Kernel & Set Version 5.10.258 (branch millennium-base)
         run: |
           echo "=== CLONING KERNEL SOURCE ==="
-          git clone --depth=1 -b android12-5.10 https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
+          git clone --depth=1 -b millennium-base https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
 
           cd kernel-source
           sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 258/' Makefile
@@ -125,7 +125,7 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (plus fix config)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY ==="
           cd $GITHUB_WORKSPACE/kernel-source
@@ -147,6 +147,7 @@ jobs:
           CONFIG_CPU_IDLE_GOV_TEO=y
           CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
           CONFIG_COMPAT_VDSO=y
+          CONFIG_THUMB2_COMPAT_VDSO=y
           CONFIG_ARM64_ERRATUM_843419=n
           CONFIG_ARM64_ERRATUM_845719=n
           CONFIG_ARM64_ERRATUM_1024718=n
@@ -185,6 +186,9 @@ jobs:
           # ===== MATIKAN HEADERS_INSTALL & PAKSA LTO NONE =====
           CONFIG_HEADERS_INSTALL=n
           CONFIG_LTO_NONE=y
+          CONFIG_RELR=y
+          CONFIG_ARCH_MMAP_RND_BITS=18
+          CONFIG_ARCH_MMAP_RND_COMPAT_BITS=11
           # ===== OVERHEAD DEBUG DI NONAKTIFKAN =====
           # CONFIG_DEBUG_INFO is not set
           CONFIG_DEBUG_INFO_REDUCED=n
@@ -197,7 +201,8 @@ jobs:
           CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
           EOF
 
-          echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
+          # Tambah flag optimasi dan disable unknown warning di Makefile
+          echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto -Wno-unknown-warning-option -Wno-error' >> Makefile
 
       - name: 6. Proses Kompilasi Kernel (Clang 22)
         run: |
@@ -222,14 +227,15 @@ jobs:
 
           make O=out ARCH=arm64 gki_defconfig
           make O=out ARCH=arm64 olddefconfig
+          # Jawab semua prompt baru dengan default (Enter)
+          yes "" | make O=out ARCH=arm64 oldconfig
 
-          # Build Image dan modules dengan flag tambahan agar warning tidak jadi error
+          # Build Image dan modules
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 \
-            KCFLAGS="-Wno-unknown-warning-option -Wno-error" \
             Image modules
 
       - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
