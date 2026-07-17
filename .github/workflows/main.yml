@@ -7,250 +7,237 @@ jobs:
   build-kernel:
     name: Kompilasi Kernel GKI (Android 12 - 5.10.258)
     runs-on: ubuntu-22.04
-    
+
     steps:
-    - name: 1. Persiapan Server & Pemasangan Clang 19
-      run: |
-        echo "=== MEMULAI SETUP ENVIRONMENT ==="
-        sudo apt-get update
-        sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg
-        
-        # Mengunduh dan memasang LLVM/Clang 19 resmi
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 19 all
-        
-        # Membuat tautan simbolis (symlink) yang kokoh untuk seluruh toolchain LLVM 19
-        LLVM_BIN_PATH="/usr/lib/llvm-19/bin"
-        sudo ln -sf "$LLVM_BIN_PATH/clang" /usr/bin/clang
-        sudo ln -sf "$LLVM_BIN_PATH/ld.lld" /usr/bin/ld.lld
-        sudo ln -sf "$LLVM_BIN_PATH/llvm-objcopy" /usr/bin/llvm-objcopy
-        sudo ln -sf "$LLVM_BIN_PATH/llvm-ar" /usr/bin/llvm-ar
-        sudo ln -sf "$LLVM_BIN_PATH/llvm-strip" /usr/bin/llvm-strip
-        sudo ln -sf "$LLVM_BIN_PATH/llvm-nm" /usr/bin/llvm-nm
-        sudo ln -sf "$LLVM_BIN_PATH/llvm-objdump" /usr/bin/llvm-objdump
-        sudo ln -sf "$LLVM_BIN_PATH/llvm-readelf" /usr/bin/llvm-readelf
-        
-        echo "$LLVM_BIN_PATH" >> $GITHUB_PATH
-        
-        echo "=== VERIFIKASI COMPILER ==="
-        clang --version
+      - name: 1. Persiapan Server & Pemasangan Clang 19
+        run: |
+          echo "=== MEMULAI SETUP ENVIRONMENT ==="
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg
 
-    - name: 2. Kloning Source Kernel & Set Version 5.10.258
-      run: |
-        echo "=== CLONING KERNEL SOURCE ==="
-        git clone --depth=1 -b android12-5.10 https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
-        
-        cd kernel-source
-        # Paksa versi kernel menjadi 5.10.258
-        sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 258/' Makefile
-        sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -Panxcz-gaming/' Makefile
-        echo "Versi kernel sekarang: $(make kernelversion 2>/dev/null || cat Makefile | grep -E '^VERSION|^PATCHLEVEL|^SUBLEVEL|^EXTRAVERSION' | tr '\n' ' ')"
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 19 all
 
-    - name: 3. Suntik ReSukiSU Core
-      run: |
-        echo "=== MENYUNTIKKAN RESUKISU CORE ==="
-        cd $GITHUB_WORKSPACE/kernel-source
-        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          LLVM_BIN_PATH="/usr/lib/llvm-19/bin"
+          sudo ln -sf "$LLVM_BIN_PATH/clang" /usr/bin/clang
+          sudo ln -sf "$LLVM_BIN_PATH/ld.lld" /usr/bin/ld.lld
+          sudo ln -sf "$LLVM_BIN_PATH/llvm-objcopy" /usr/bin/llvm-objcopy
+          sudo ln -sf "$LLVM_BIN_PATH/llvm-ar" /usr/bin/llvm-ar
+          sudo ln -sf "$LLVM_BIN_PATH/llvm-strip" /usr/bin/llvm-strip
+          sudo ln -sf "$LLVM_BIN_PATH/llvm-nm" /usr/bin/llvm-nm
+          sudo ln -sf "$LLVM_BIN_PATH/llvm-objdump" /usr/bin/llvm-objdump
+          sudo ln -sf "$LLVM_BIN_PATH/llvm-readelf" /usr/bin/llvm-readelf
 
-        - name: 4. Integrasi SUSFS v2.2.0 (Smart Fallback + Multi-Mirror)
-    run: |
-      echo "=== INTEGRASI SUSFS v2.2.0 ==="
-      cd $GITHUB_WORKSPACE
-      # Clone branch gki-android12-5.10 (sudah mencakup v2.2.0)
-      git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
-    
-      # [FIX] Cari ksu_susfs.h dengan multi-mirror
-      echo "Mencari file ksu_susfs.h..."
-      mkdir -p $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel
-      SUSFS_HEADER=$(find $GITHUB_WORKSPACE/susfs-source -name "ksu_susfs.h" | head -n 1)
-    
-      if [ -n "$SUSFS_HEADER" ]; then
-      cp "$SUSFS_HEADER" $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/
-      echo "ksu_susfs.h berhasil disalin dari repositori lokal!"
-      else
-      echo "ksu_susfs.h tidak ditemukan di repositori, mencoba mirror..."
-      MIRRORS=(
-        "https://raw.githubusercontent.com/sidrxt/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-        "https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android12-5.10/kernel_patches/include/linux/ksu_susfs.h"
-        "https://raw.githubusercontent.com/5ec1cff/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-        "https://raw.githubusercontent.com/backslashxx/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-      )
-      DOWNLOAD_SUCCESS=0
-      for url in "${MIRRORS[@]}"; do
-        if wget -qO "$GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h" "$url"; then
-          echo "ksu_susfs.h berhasil diunduh dari $url"
-          DOWNLOAD_SUCCESS=1
-          break
-        fi
-      done
-      if [ $DOWNLOAD_SUCCESS -ne 1 ]; then
-        echo "Gagal mengunduh ksu_susfs.h dari semua mirror." && exit 1
-        fi
-      fi
-    
-      # Salin patch fs dan include
-      echo "Menyalin kernel patches..."
-      cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/fs/* $GITHUB_WORKSPACE/kernel-source/fs/ 2>/dev/null || true
-      cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/include/linux/* $GITHUB_WORKSPACE/kernel-source/include/linux/ 2>/dev/null || true
-      find $GITHUB_WORKSPACE/susfs-source/kernel_patches -name "*.patch" -exec cp {} $GITHUB_WORKSPACE/kernel-source/ \;
-    
-      cd $GITHUB_WORKSPACE/kernel-source
-      SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
-      echo "Sublevel kernel: 5.10.$SUBLEVEL"
-    
-      # Fake patches untuk sublevel tertentu (tetap)
-       if [ "$SUBLEVEL" -le "43" ]; then
-      perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
-      fi
-      if [ "$SUBLEVEL" -le "117" ]; then
-        sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c
-        perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c
-        perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
-      fi
-    
-      # Eksekusi patch utama SUSFS (cari otomatis)
-      PATCH_FILE=$(ls 50_*.patch 2>/dev/null | head -n 1)
-      if [ -n "$PATCH_FILE" ]; then
-        echo "Mengeksekusi patch $PATCH_FILE ..."
-        patch -p1 < "$PATCH_FILE"
-      else
-        echo "Tidak ada patch SUSFS ditemukan!" && exit 1
-      fi
-    
-      # Perbaikan show_pad
-      if [ "$SUBLEVEL" -le "209" ]; then
-        sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
-      fi
+          echo "$LLVM_BIN_PATH" >> $GITHUB_PATH
+
+          echo "=== VERIFIKASI COMPILER ==="
+          clang --version
+
+      - name: 2. Kloning Source Kernel & Set Version 5.10.258
+        run: |
+          echo "=== CLONING KERNEL SOURCE ==="
+          git clone --depth=1 -b android12-5.10 https://github.com/MillenniumOSS/android_kernel_common_android12-5.10.git kernel-source
+
+          cd kernel-source
+          sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 258/' Makefile
+          sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -Panxcz-gaming/' Makefile
+          echo "Versi kernel sekarang: $(make kernelversion 2>/dev/null || cat Makefile | grep -E '^VERSION|^PATCHLEVEL|^SUBLEVEL|^EXTRAVERSION' | tr '\n' ' ')"
+
+      - name: 3. Suntik ReSukiSU Core
+        run: |
+          echo "=== MENYUNTIKKAN RESUKISU CORE ==="
+          cd $GITHUB_WORKSPACE/kernel-source
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+
+      - name: 4. Integrasi SUSFS v2.2.0 (branch gki-android12-5.10)
+        run: |
+          echo "=== INTEGRASI SUSFS v2.2.0 ==="
+          cd $GITHUB_WORKSPACE
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
+
+          echo "Mencari file ksu_susfs.h..."
+          mkdir -p $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel
+          SUSFS_HEADER=$(find $GITHUB_WORKSPACE/susfs-source -name "ksu_susfs.h" | head -n 1)
+
+          if [ -n "$SUSFS_HEADER" ]; then
+            cp "$SUSFS_HEADER" $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/
+            echo "ksu_susfs.h berhasil disalin dari repositori lokal!"
+          else
+            echo "ksu_susfs.h tidak ditemukan di repositori, mencoba mirror..."
+            MIRRORS=(
+              "https://raw.githubusercontent.com/sidrxt/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
+              "https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android12-5.10/kernel_patches/include/linux/ksu_susfs.h"
+              "https://raw.githubusercontent.com/5ec1cff/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
+              "https://raw.githubusercontent.com/backslashxx/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
+            )
+            DOWNLOAD_SUCCESS=0
+            for url in "${MIRRORS[@]}"; do
+              if wget -qO "$GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h" "$url"; then
+                echo "ksu_susfs.h berhasil diunduh dari $url"
+                DOWNLOAD_SUCCESS=1
+                break
+              fi
+            done
+            if [ $DOWNLOAD_SUCCESS -ne 1 ]; then
+              echo "Gagal mengunduh ksu_susfs.h dari semua mirror." && exit 1
+            fi
+          fi
+
+          echo "Menyalin kernel patches..."
+          cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/fs/* $GITHUB_WORKSPACE/kernel-source/fs/ 2>/dev/null || true
+          cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/include/linux/* $GITHUB_WORKSPACE/kernel-source/include/linux/ 2>/dev/null || true
+          find $GITHUB_WORKSPACE/susfs-source/kernel_patches -name "*.patch" -exec cp {} $GITHUB_WORKSPACE/kernel-source/ \;
+
+          cd $GITHUB_WORKSPACE/kernel-source
+          SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
+          echo "Sublevel kernel: 5.10.$SUBLEVEL"
+
+          if [ "$SUBLEVEL" -le "43" ]; then
+            perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
+          fi
+          if [ "$SUBLEVEL" -le "117" ]; then
+            sed -i '/^[[:space:]]*\/\*$/,/^[[:space:]]*u32 mask = mark->mask & IN_ALL_EVENTS;$/d' fs/notify/fdinfo.c
+            perl -i -pe 's/\bmask,\s*mark->ignored_mask/inotify_mark_user_mask(mark)/g' fs/notify/fdinfo.c
+            perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
+          fi
+
+          PATCH_FILE=$(ls 50_*.patch 2>/dev/null | head -n 1)
+          if [ -n "$PATCH_FILE" ]; then
+            echo "Mengeksekusi patch $PATCH_FILE ..."
+            patch -p1 < "$PATCH_FILE"
+          else
+            echo "Tidak ada patch SUSFS ditemukan!" && exit 1
+          fi
+
+          if [ "$SUBLEVEL" -le "209" ]; then
+            sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
+          fi
 
       - name: 5. Konfigurasi Optimasi Gaming & Memory Core
-      run: |
-        echo "=== SUNTIK OPTIMASI GAME & MEMORY ==="
-        cd $GITHUB_WORKSPACE/kernel-source
-        
-        # Hapus -Werror di seluruh Makefile
-        find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
-        
-        # Tambahkan konfigurasi gaming & memory ke defconfig
-        cat << 'EOF' >> arch/arm64/configs/gki_defconfig
-        # ===== OPTIMASI GAMING =====
-        CONFIG_HZ_1000=y
-        CONFIG_HZ=1000
-        CONFIG_SCHED_AUTOGROUP=y
-        CONFIG_CFS_BANDWIDTH=y
-        CONFIG_RT_GROUP_SCHED=y
-        CONFIG_ENERGY_MODEL=y
-        CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-        CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
-        CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
-        CONFIG_CPU_IDLE_GOV_MENU=y
-        CONFIG_CPU_IDLE_GOV_TEO=y
-        CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
-        CONFIG_COMPAT_VDSO=y
-        CONFIG_ARM64_ERRATUM_843419=n
-        CONFIG_ARM64_ERRATUM_845719=n
-        CONFIG_ARM64_ERRATUM_1024718=n
-        CONFIG_ARM64_ERRATUM_1418040=n
-        CONFIG_ARM64_ERRATUM_1165522=n
-        CONFIG_ARM64_ERRATUM_1286807=n
-        CONFIG_ARM64_ERRATUM_1463225=n
-        CONFIG_ARM64_ERRATUM_1542419=n
-        CONFIG_ARM64_ERRATUM_1508412=n
-        CONFIG_ARM64_ERRATUM_2054223=n
-        CONFIG_ARM64_ERRATUM_2067961=n
-        CONFIG_ARM64_ERRATUM_2077057=n
-        CONFIG_ARM64_ERRATUM_2081180=n
-        CONFIG_ARM64_ERRATUM_2139208=n
-        CONFIG_ARM64_ERRATUM_2441009=n
-        CONFIG_ARM64_ERRATUM_2457168=n
-        CONFIG_ARM64_ERRATUM_2645198=n
-        # ===== OPTIMASI MEMORY =====
-        CONFIG_ZRAM=y
-        CONFIG_ZRAM_DEF_COMP_LZ4=y
-        CONFIG_ZRAM_DEF_COMP="lz4"
-        CONFIG_ZSMALLOC=y
-        CONFIG_TRANSPARENT_HUGEPAGE=y
-        CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS=y
-        CONFIG_CLEANCACHE=y
-        CONFIG_FRONTSWAP=y
-        CONFIG_MEMORY_BALLOON=y
-        CONFIG_BALLOON_COMPACTION=y
-        CONFIG_COMPACTION=y
-        CONFIG_MIGRATION=y
-        CONFIG_KSM=y
-        CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
-        CONFIG_LZ4_COMPRESS=y
-        CONFIG_LZ4_DECOMPRESS=y
-        CONFIG_CRYPTO_LZ4=y
-        CONFIG_CRYPTO_LZ4HC=y
-        # ===== OVERHEAD DEBUG DI NONAKTIFKAN =====
-        # CONFIG_DEBUG_INFO is not set
-        CONFIG_DEBUG_INFO_REDUCED=n
-        CONFIG_SLUB_DEBUG=n
-        CONFIG_PANIC_ON_OOPS=n
-        CONFIG_LOCKUP_DETECTOR=n
-        CONFIG_SCHED_DEBUG=n
-        CONFIG_WERROR=n
-        CONFIG_FRAME_WARN=4096
-        CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
-        EOF
+        run: |
+          echo "=== SUNTIK OPTIMASI GAME & MEMORY ==="
+          cd $GITHUB_WORKSPACE/kernel-source
 
-        # Tambahkan flag optimasi untuk Clang (optional)
-        echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
+          find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
+
+          cat << 'EOF' >> arch/arm64/configs/gki_defconfig
+          # ===== OPTIMASI GAMING =====
+          CONFIG_HZ_1000=y
+          CONFIG_HZ=1000
+          CONFIG_SCHED_AUTOGROUP=y
+          CONFIG_CFS_BANDWIDTH=y
+          CONFIG_RT_GROUP_SCHED=y
+          CONFIG_ENERGY_MODEL=y
+          CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+          CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
+          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+          CONFIG_CPU_IDLE_GOV_MENU=y
+          CONFIG_CPU_IDLE_GOV_TEO=y
+          CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
+          CONFIG_COMPAT_VDSO=y
+          CONFIG_ARM64_ERRATUM_843419=n
+          CONFIG_ARM64_ERRATUM_845719=n
+          CONFIG_ARM64_ERRATUM_1024718=n
+          CONFIG_ARM64_ERRATUM_1418040=n
+          CONFIG_ARM64_ERRATUM_1165522=n
+          CONFIG_ARM64_ERRATUM_1286807=n
+          CONFIG_ARM64_ERRATUM_1463225=n
+          CONFIG_ARM64_ERRATUM_1542419=n
+          CONFIG_ARM64_ERRATUM_1508412=n
+          CONFIG_ARM64_ERRATUM_2054223=n
+          CONFIG_ARM64_ERRATUM_2067961=n
+          CONFIG_ARM64_ERRATUM_2077057=n
+          CONFIG_ARM64_ERRATUM_2081180=n
+          CONFIG_ARM64_ERRATUM_2139208=n
+          CONFIG_ARM64_ERRATUM_2441009=n
+          CONFIG_ARM64_ERRATUM_2457168=n
+          CONFIG_ARM64_ERRATUM_2645198=n
+          # ===== OPTIMASI MEMORY =====
+          CONFIG_ZRAM=y
+          CONFIG_ZRAM_DEF_COMP_LZ4=y
+          CONFIG_ZRAM_DEF_COMP="lz4"
+          CONFIG_ZSMALLOC=y
+          CONFIG_TRANSPARENT_HUGEPAGE=y
+          CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS=y
+          CONFIG_CLEANCACHE=y
+          CONFIG_FRONTSWAP=y
+          CONFIG_MEMORY_BALLOON=y
+          CONFIG_BALLOON_COMPACTION=y
+          CONFIG_COMPACTION=y
+          CONFIG_MIGRATION=y
+          CONFIG_KSM=y
+          CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_LZ4HC=y
+          # ===== OVERHEAD DEBUG DI NONAKTIFKAN =====
+          # CONFIG_DEBUG_INFO is not set
+          CONFIG_DEBUG_INFO_REDUCED=n
+          CONFIG_SLUB_DEBUG=n
+          CONFIG_PANIC_ON_OOPS=n
+          CONFIG_LOCKUP_DETECTOR=n
+          CONFIG_SCHED_DEBUG=n
+          CONFIG_WERROR=n
+          CONFIG_FRAME_WARN=4096
+          CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
+          EOF
+
+          echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
 
       - name: 6. Proses Kompilasi Kernel (Clang 19)
-      run: |
-        echo "=== MEMULAI KOMPILASI KERNEL ==="
-        cd $GITHUB_WORKSPACE/kernel-source
-        export PATH="/usr/lib/llvm-19/bin:$PATH"
-        
-        # Tambahkan konfigurasi SUSFS (sudah ada di step 5, tapi kita pastikan)
-        {
-          echo "CONFIG_KSU_SUSFS=y"
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n"
-          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
-          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
-          echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
-          echo 'CONFIG_LOCALVERSION="-Panxcz-susfs"'
-        } >> arch/arm64/configs/gki_defconfig
-        
-        make O=out ARCH=arm64 gki_defconfig
-        make O=out ARCH=arm64 olddefconfig
-        
-        make -j$(nproc --all) O=out ARCH=arm64 \
-          HOSTCC=gcc HOSTCXX=g++ \
-          CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-          CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-          LLVM=1 LLVM_IAS=1
-
-        - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
         run: |
-        echo "=== PACKING ZIP INSTALASI ==="
-        cd $GITHUB_WORKSPACE
-        git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
-        
-        if [ -f kernel-source/out/arch/arm64/boot/Image ]; then
-          cp kernel-source/out/arch/arm64/boot/Image AK3/
-          echo "Berkas Image kernel berhasil disalin!"
-        else
-          echo "Error: Berkas Image tidak ditemukan!" && exit 1
-        fi
-        
-        cd AK3
-        sed -i 's|block=.*|block=/dev/block/by-name/boot;|g' anykernel.sh
-        sed -i 's|is_slot_device=.*|is_slot_device=auto;|g' anykernel.sh
-        echo 'partition_list="boot_a boot_b boot dtbo_a dtbo_b";' >> anykernel.sh
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-        
-        zip -r9 ../Panxcz_kernel_susfs.zip *
+          echo "=== MEMULAI KOMPILASI KERNEL ==="
+          cd $GITHUB_WORKSPACE/kernel-source
+          export PATH="/usr/lib/llvm-19/bin:$PATH"
 
-        - name: 8. Mengunggah Hasil Build Jadi
-          uses: actions/upload-artifact@v4
+          {
+            echo "CONFIG_KSU_SUSFS=y"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=n"
+            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
+            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
+            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
+            echo "CONFIG_KSU_SUSFS_SUS_MAP=y"
+            echo 'CONFIG_LOCALVERSION="-Panxcz-susfs"'
+          } >> arch/arm64/configs/gki_defconfig
+
+          make O=out ARCH=arm64 gki_defconfig
+          make O=out ARCH=arm64 olddefconfig
+
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            HOSTCC=gcc HOSTCXX=g++ \
+            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 LLVM_IAS=1
+
+      - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
+        run: |
+          echo "=== PACKING ZIP INSTALASI ==="
+          cd $GITHUB_WORKSPACE
+          git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
+
+          if [ -f kernel-source/out/arch/arm64/boot/Image ]; then
+            cp kernel-source/out/arch/arm64/boot/Image AK3/
+            echo "Berkas Image kernel berhasil disalin!"
+          else
+            echo "Error: Berkas Image tidak ditemukan!" && exit 1
+          fi
+
+          cd AK3
+          sed -i 's|block=.*|block=/dev/block/by-name/boot;|g' anykernel.sh
+          sed -i 's|is_slot_device=.*|is_slot_device=auto;|g' anykernel.sh
+          echo 'partition_list="boot_a boot_b boot dtbo_a dtbo_b";' >> anykernel.sh
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+
+          zip -r9 ../Panxcz_kernel_susfs.zip *
+
+      - name: 8. Mengunggah Hasil Build Jadi
+        uses: actions/upload-artifact@v4
         with:
-        name: Panxcz_kernel_susfs
-        path: Panxcz_kernel_susfs.zip
+          name: Panxcz_kernel_susfs
+          path: Panxcz_kernel_susfs.zip
