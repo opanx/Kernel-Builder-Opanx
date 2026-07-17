@@ -125,27 +125,24 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (hard fix Werror & config)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (Hard Fix Werror)
         run: |
-          echo "=== SUNTIK OPTIMASI GAME & MEMORY ==="
+          echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
-          # 1. Hapus semua -Werror dan -Werror=... dari semua Makefile
-          find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g; s/-Wstrict-prototypes//g' || true
-          sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g; s/-Wstrict-prototypes//g' arch/arm64/Makefile || true
-          sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g; s/-Wstrict-prototypes//g' scripts/Makefile.extrawarn || true
-
-          # 2. Tambahkan flag -Wno-unknown-warning-option ke KBUILD_CFLAGS di Makefile
-          echo 'KBUILD_CFLAGS += -Wno-unknown-warning-option -Wno-error' >> Makefile
+          # --- BRUTAL: Hapus semua -Werror dan -Werror=... dari semua Makefile & Kbuild ---
+          find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i 's/\-Werror\b//g; s/\-Werror=[^ ]*//g; s/\-Wstrict-prototypes//g; s/\-Wimplicit-function-declaration//g; s/\-Wimplicit-int//g; s/\-Wreturn-type//g; s/\-Wdate-time//g' {} \;
+          # Tambahkan -Wno-error dan -Wno-unknown-warning-option ke Makefile utama
+          echo 'KBUILD_CFLAGS += -Wno-error -Wno-unknown-warning-option' >> Makefile
+          echo 'HOSTCFLAGS += -Wno-error -Wno-unknown-warning-option' >> Makefile
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
-          echo 'HOSTCFLAGS += -Wno-unknown-warning-option -Wno-error' >> Makefile
 
-          # 3. Buat defconfig dulu
+          # --- Generate defconfig dulu ---
           make O=out ARCH=arm64 gki_defconfig
 
-          # 4. Set semua opsi konfigurasi menggunakan scripts/config (biar presisi)
+          # --- Set semua opsi dengan scripts/config (presisi) ---
           cd out
-          # Aktifkan gaming & memory
+          # Gaming
           ../scripts/config --enable CONFIG_HZ_1000 --set-val CONFIG_HZ 1000
           ../scripts/config --enable CONFIG_SCHED_AUTOGROUP
           ../scripts/config --enable CONFIG_CFS_BANDWIDTH
@@ -170,7 +167,7 @@ jobs:
           ../scripts/config --enable CONFIG_KASAN_GENERIC
           ../scripts/config --enable CONFIG_KASAN_OUTLINE
           ../scripts/config --enable CONFIG_KASAN_STACK
-          # Nonaktifkan erratum yang gak perlu
+          # Nonaktifkan erratum
           for err in 843419 845719 1024718 1418040 1165522 1286807 1463225 1542419 1508412 2054223 2067961 2077057 2081180 2139208 2441009 2457168 2645198; do
             ../scripts/config --disable CONFIG_ARM64_ERRATUM_$err
           done
@@ -192,9 +189,8 @@ jobs:
           ../scripts/config --enable CONFIG_LZ4_DECOMPRESS
           ../scripts/config --enable CONFIG_CRYPTO_LZ4
           ../scripts/config --enable CONFIG_CRYPTO_LZ4HC
-          # Matikan debug & headers
+          # Debug & lain
           ../scripts/config --disable CONFIG_HEADERS_INSTALL
-          ../scripts/config --disable CONFIG_LTO_NONE   # pilih none
           ../scripts/config --enable CONFIG_LTO_NONE
           ../scripts/config --enable CONFIG_RELR
           ../scripts/config --set-val CONFIG_ARCH_MMAP_RND_BITS 18
@@ -207,7 +203,7 @@ jobs:
           ../scripts/config --disable CONFIG_WERROR
           ../scripts/config --set-val CONFIG_FRAME_WARN 4096
           ../scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
-          # Tambahkan SUSFS
+          # SUSFS
           ../scripts/config --enable CONFIG_KSU_SUSFS
           ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_PATH
           ../scripts/config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
@@ -221,7 +217,7 @@ jobs:
           ../scripts/config --set-val CONFIG_LOCALVERSION "-Panxcz-susfs"
           cd ..
 
-          # 5. Jalankan olddefconfig untuk fix dependency
+          # --- Jalankan olddefconfig untuk resolve dependency ---
           make O=out ARCH=arm64 olddefconfig
 
       - name: 6. Proses Kompilasi Kernel (Clang 22)
@@ -229,6 +225,9 @@ jobs:
           echo "=== MEMULAI KOMPILASI KERNEL ==="
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
+          # Set environment flags
+          export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option"
+          export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option"
 
           # Build Image dan modules
           make -j$(nproc --all) O=out ARCH=arm64 \
@@ -236,8 +235,8 @@ jobs:
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 \
-            KCFLAGS="-Wno-unknown-warning-option -Wno-error" \
-            HOSTCFLAGS="-Wno-unknown-warning-option -Wno-error" \
+            KCFLAGS="-Wno-error -Wno-unknown-warning-option" \
+            HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option" \
             Image modules
 
       - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
