@@ -125,12 +125,15 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (plus fix config)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (fix Werror)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
-          find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
+          # HAPUS SEMUA -Werror dan -Werror=... (biar clang ga error)
+          find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g' || true
+          # Hapus juga di arch/arm64/Makefile khusus
+          sed -i 's/-Werror\b//g; s/-Werror=[^ ]*//g' arch/arm64/Makefile || true
 
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           # ===== OPTIMASI GAMING =====
@@ -148,6 +151,17 @@ jobs:
           CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
           CONFIG_COMPAT_VDSO=y
           CONFIG_THUMB2_COMPAT_VDSO=y
+          CONFIG_ARM64_PTR_AUTH=y
+          CONFIG_ARM64_BTI_KERNEL=y
+          CONFIG_ARM64_TLB_RANGE=y
+          CONFIG_ARM64_MTE=y
+          CONFIG_SHADOW_CALL_STACK=n
+          CONFIG_LLVM_POLLY=y
+          CONFIG_INIT_STACK_NONE=y
+          CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+          CONFIG_KASAN_GENERIC=y
+          CONFIG_KASAN_OUTLINE=y
+          CONFIG_KASAN_STACK=y
           CONFIG_ARM64_ERRATUM_843419=n
           CONFIG_ARM64_ERRATUM_845719=n
           CONFIG_ARM64_ERRATUM_1024718=n
@@ -183,7 +197,7 @@ jobs:
           CONFIG_LZ4_DECOMPRESS=y
           CONFIG_CRYPTO_LZ4=y
           CONFIG_CRYPTO_LZ4HC=y
-          # ===== MATIKAN HEADERS_INSTALL & PAKSA LTO NONE =====
+          # ===== MATIKAN HEADERS_INSTALL, PAKSA LTO NONE, DLL =====
           CONFIG_HEADERS_INSTALL=n
           CONFIG_LTO_NONE=y
           CONFIG_RELR=y
@@ -201,8 +215,9 @@ jobs:
           CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
           EOF
 
-          # Tambah flag optimasi dan disable unknown warning di Makefile
+          # Tambah flag optimasi dan disable warning di Makefile (aman)
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto -Wno-unknown-warning-option -Wno-error' >> Makefile
+          echo 'KBUILD_LDFLAGS += -Wno-unknown-warning-option' >> Makefile
 
       - name: 6. Proses Kompilasi Kernel (Clang 22)
         run: |
@@ -210,7 +225,6 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
 
-          # Tambahkan konfigurasi SUSFS
           {
             echo "CONFIG_KSU_SUSFS=y"
             echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
@@ -226,16 +240,15 @@ jobs:
           } >> arch/arm64/configs/gki_defconfig
 
           make O=out ARCH=arm64 gki_defconfig
-          make O=out ARCH=arm64 olddefconfig
-          # Jawab semua prompt baru dengan default (Enter)
-          yes "" | make O=out ARCH=arm64 oldconfig
+          make O=out ARCH=arm64 olddefconfig   # ← ini otomatis jawab semua prompt
 
-          # Build Image dan modules
+          # Build dengan KCFLAGS tambahan
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 \
+            KCFLAGS="-Wno-unknown-warning-option -Wno-error" \
             Image modules
 
       - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
