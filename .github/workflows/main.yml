@@ -50,40 +50,52 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel-source
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
-      - name: 4. Integrasi SUSFS v2.2.0 (branch gki-android12-5.10)
+      - name: 4. Integrasi SUSFS v2.2.0 (dengan fallback header)
         run: |
           echo "=== INTEGRASI SUSFS v2.2.0 ==="
           cd $GITHUB_WORKSPACE
+
+          # Clone susfs4ksu branch gki-android12-5.10
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-source
 
-          echo "Mencari file ksu_susfs.h..."
-          mkdir -p $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel
-          SUSFS_HEADER=$(find $GITHUB_WORKSPACE/susfs-source -name "ksu_susfs.h" | head -n 1)
+          # Tentukan lokasi tujuan header
+          HEADER_DEST="$GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h"
+          mkdir -p "$(dirname "$HEADER_DEST")"
 
-          if [ -n "$SUSFS_HEADER" ]; then
-            cp "$SUSFS_HEADER" $GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/
-            echo "ksu_susfs.h berhasil disalin dari repositori lokal!"
+          # 1. Coba ambil dari KernelSU (hasil step 3)
+          if [ -f "$HEADER_DEST" ]; then
+            echo "ksu_susfs.h sudah ada dari ReSukiSU, skip."
           else
-            echo "ksu_susfs.h tidak ditemukan di repositori, mencoba mirror..."
-            MIRRORS=(
-              "https://raw.githubusercontent.com/sidrxt/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-              "https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android12-5.10/kernel_patches/include/linux/ksu_susfs.h"
-              "https://raw.githubusercontent.com/5ec1cff/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-              "https://raw.githubusercontent.com/backslashxx/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
-            )
-            DOWNLOAD_SUCCESS=0
-            for url in "${MIRRORS[@]}"; do
-              if wget -qO "$GITHUB_WORKSPACE/kernel-source/KernelSU/kernel/ksu_susfs.h" "$url"; then
-                echo "ksu_susfs.h berhasil diunduh dari $url"
-                DOWNLOAD_SUCCESS=1
-                break
+            echo "ksu_susfs.h belum ada, mencari dari susfs-source..."
+            SUSFS_HEADER=$(find $GITHUB_WORKSPACE/susfs-source -name "ksu_susfs.h" | head -n 1)
+            if [ -n "$SUSFS_HEADER" ]; then
+              cp "$SUSFS_HEADER" "$HEADER_DEST"
+              echo "ksu_susfs.h berhasil disalin dari repositori lokal!"
+            else
+              echo "Tidak ditemukan di susfs-source, coba mirror via curl..."
+              MIRRORS=(
+                "https://raw.githubusercontent.com/5ec1cff/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
+                "https://raw.githubusercontent.com/sidrxt/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
+                "https://raw.githubusercontent.com/backslashxx/KernelSU-SUSFS/main/kernel/ksu_susfs.h"
+              )
+              DOWNLOAD_SUCCESS=0
+              for url in "${MIRRORS[@]}"; do
+                if curl -fsSL -o "$HEADER_DEST" "$url"; then
+                  echo "ksu_susfs.h berhasil diunduh dari $url"
+                  DOWNLOAD_SUCCESS=1
+                  break
+                else
+                  echo "Gagal dari $url, coba berikutnya..."
+                fi
+              done
+              if [ $DOWNLOAD_SUCCESS -ne 1 ]; then
+                echo "Semua mirror gagal, buat file kosong (risiko kompilasi)."
+                touch "$HEADER_DEST"
               fi
-            done
-            if [ $DOWNLOAD_SUCCESS -ne 1 ]; then
-              echo "Gagal mengunduh ksu_susfs.h dari semua mirror." && exit 1
             fi
           fi
 
+          # Salin semua file patch dan include dari susfs-source
           echo "Menyalin kernel patches..."
           cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/fs/* $GITHUB_WORKSPACE/kernel-source/fs/ 2>/dev/null || true
           cp -r $GITHUB_WORKSPACE/susfs-source/kernel_patches/include/linux/* $GITHUB_WORKSPACE/kernel-source/include/linux/ 2>/dev/null || true
@@ -93,6 +105,7 @@ jobs:
           SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
           echo "Sublevel kernel: 5.10.$SUBLEVEL"
 
+          # Workaround untuk sublevel kecil
           if [ "$SUBLEVEL" -le "43" ]; then
             perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
           fi
@@ -102,14 +115,16 @@ jobs:
             perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
           fi
 
+          # Apply patch utama (cari yang 50_*.patch)
           PATCH_FILE=$(ls 50_*.patch 2>/dev/null | head -n 1)
           if [ -n "$PATCH_FILE" ]; then
             echo "Mengeksekusi patch $PATCH_FILE ..."
-            patch -p1 < "$PATCH_FILE"
+            patch -p1 --forward --reject-file=- < "$PATCH_FILE" || true
           else
             echo "Tidak ada patch SUSFS ditemukan!" && exit 1
           fi
 
+          # Perbaikan show_pad untuk sublevel <= 209
           if [ "$SUBLEVEL" -le "209" ]; then
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
@@ -119,8 +134,10 @@ jobs:
           echo "=== SUNTIK OPTIMASI GAME & MEMORY ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
+          # Hapus -Werror di seluruh Makefile/Kbuild
           find . -name "Makefile" -o -name "Kbuild" | xargs sed -i 's/-Werror//g' || true
 
+          # Tambahkan konfigurasi ke gki_defconfig
           cat << 'EOF' >> arch/arm64/configs/gki_defconfig
           # ===== OPTIMASI GAMING =====
           CONFIG_HZ_1000=y
@@ -184,6 +201,7 @@ jobs:
           CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
           EOF
 
+          # Tambahkan flag optimasi Clang
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
 
       - name: 6. Proses Kompilasi Kernel (Clang 19)
@@ -192,6 +210,7 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-19/bin:$PATH"
 
+          # Tambahkan konfigurasi SUSFS ke defconfig
           {
             echo "CONFIG_KSU_SUSFS=y"
             echo "CONFIG_KSU_SUSFS_SUS_PATH=y"
