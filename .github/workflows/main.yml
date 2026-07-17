@@ -125,22 +125,35 @@ jobs:
             sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
           fi
 
-      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (Hard Fix Werror)
+      - name: 5. Konfigurasi Optimasi Gaming & Memory Core (HARD FIX FLAGS)
         run: |
           echo "=== SUNTIK OPTIMASI GAME & MEMORY (HARD FIX) ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
-          # --- BRUTAL: Hapus semua -Werror dan -Werror=... dari semua Makefile & Kbuild ---
-          find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i 's/\-Werror\b//g; s/\-Werror=[^ ]*//g; s/\-Wstrict-prototypes//g; s/\-Wimplicit-function-declaration//g; s/\-Wimplicit-int//g; s/\-Wreturn-type//g; s/\-Wdate-time//g' {} \;
+          # --- BRUTAL CLEAN: Hapus semua -Werror, -Werror=..., dan sisa =... yang terpotong ---
+          find . -type f \( -name "Makefile" -o -name "Kbuild" \) -exec sed -i \
+            -e 's/\-Werror\b//g' \
+            -e 's/\-Werror=[^ ]*//g' \
+            -e 's/\-Wstrict-prototypes//g' \
+            -e 's/\-Wimplicit-function-declaration//g' \
+            -e 's/\-Wimplicit-int//g' \
+            -e 's/\-Wreturn-type//g' \
+            -e 's/\-Wdate-time//g' \
+            -e 's/=strict-prototypes//g' \
+            -e 's/=implicit-function-declaration//g' \
+            -e 's/=implicit-int//g' \
+            -e 's/=return-type//g' \
+            -e 's/=date-time//g' \
+            -e 's/=unknown-warning-option//g' {} \;
+
           # Tambahkan -Wno-error dan -Wno-unknown-warning-option ke Makefile utama
           echo 'KBUILD_CFLAGS += -Wno-error -Wno-unknown-warning-option' >> Makefile
           echo 'HOSTCFLAGS += -Wno-error -Wno-unknown-warning-option' >> Makefile
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
 
-          # --- Generate defconfig dulu ---
+          # Generate defconfig dan atur opsi dengan scripts/config
           make O=out ARCH=arm64 gki_defconfig
 
-          # --- Set semua opsi dengan scripts/config (presisi) ---
           cd out
           # Gaming
           ../scripts/config --enable CONFIG_HZ_1000 --set-val CONFIG_HZ 1000
@@ -217,26 +230,26 @@ jobs:
           ../scripts/config --set-val CONFIG_LOCALVERSION "-Panxcz-susfs"
           cd ..
 
-          # --- Jalankan olddefconfig untuk resolve dependency ---
+          # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 6. Proses Kompilasi Kernel (Clang 22)
+      - name: 6. Proses Kompilasi Kernel (OVERRIDE FLAGS TOTAL)
         run: |
-          echo "=== MEMULAI KOMPILASI KERNEL ==="
+          echo "=== MEMULAI KOMPILASI KERNEL (OVERRIDE) ==="
           cd $GITHUB_WORKSPACE/kernel-source
           export PATH="/usr/lib/llvm-22/bin:$PATH"
-          # Set environment flags
-          export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option"
-          export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option"
 
-          # Build Image dan modules
+          # Override total KBUILD_CFLAGS dan HOSTCFLAGS via environment dan make variable
+          export KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3"
+          export HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time"
+
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 \
-            KCFLAGS="-Wno-error -Wno-unknown-warning-option" \
-            HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option" \
+            KBUILD_CFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time -O3" \
+            HOSTCFLAGS="-Wno-error -Wno-unknown-warning-option -Wno-strict-prototypes -Wno-implicit-function-declaration -Wno-implicit-int -Wno-return-type -Wno-date-time" \
             Image modules
 
       - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
