@@ -11,25 +11,34 @@ on:
         options:
           - resukisu
           - kernelsu-next
+      clang_version:
+        description: 'Pilih versi Clang'
+        required: true
+        default: '20'
+        type: choice
+        options:
+          - '19'
+          - '20'
 
 jobs:
   build-kernel:
-    name: Build Kernel (Clang 20)
+    name: Build Kernel (Clang ${{ github.event.inputs.clang_version }})
     runs-on: ubuntu-22.04
 
     steps:
-      - name: 1. Setup Environment & Clang 20
+      - name: 1. Setup Environment & Clang
         run: |
-          echo "=== SETUP ENVIRONMENT & CLANG 20 ==="
+          CLANG_VER="${{ github.event.inputs.clang_version }}"
+          echo "=== SETUP ENVIRONMENT & CLANG ${CLANG_VER} ==="
           sudo apt-get update
           sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libfl-dev curl git zip unzip perl jq wget lsb-release software-properties-common gpg libelf-dev
 
-          # Install Clang 20
+          # Install Clang versi pilihan
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 20 all
+          sudo ./llvm.sh ${CLANG_VER} all
 
-          LLVM_BIN_PATH="/usr/lib/llvm-20/bin"
+          LLVM_BIN_PATH="/usr/lib/llvm-${CLANG_VER}/bin"
           sudo ln -sf "$LLVM_BIN_PATH/clang" /usr/bin/clang
           sudo ln -sf "$LLVM_BIN_PATH/ld.lld" /usr/bin/ld.lld
           sudo ln -sf "$LLVM_BIN_PATH/llvm-objcopy" /usr/bin/llvm-objcopy
@@ -117,9 +126,9 @@ jobs:
 
           [ "$SUBLEVEL" -le "209" ] && sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
 
-      - name: 5. Konfigurasi Optimasi + Matikan BPF/BTF Total
+      - name: 5. Konfigurasi Optimasi & Matikan BPF/BTF Total (Brutal)
         run: |
-          echo "=== KONFIGURASI OPTIMASI & MATIKAN BPF/BTF ==="
+          echo "=== KONFIGURASI OPTIMASI & MATIKAN BPF/BTF (BRUTAL) ==="
           cd $GITHUB_WORKSPACE/kernel-source
 
           # Hapus semua -Werror dan flag bermasalah
@@ -142,10 +151,17 @@ jobs:
 
           # Hapus tools/bpf & bersihkan referensi
           rm -rf tools/bpf
-          sed -i '/resolve_btfids/d' Makefile
-          sed -i '/prepare-resolve_btfids/d' Makefile
+
+          # Hapus semua referensi resolve_btfids dari semua Makefile
+          find . -name "Makefile" -exec sed -i '/resolve_btfids/d' {} \;
+          find . -name "Makefile" -exec sed -i '/prepare-resolve_btfids/d' {} \;
+
+          # Tambahkan aturan kosong di root Makefile
           echo -e "\nprepare-resolve_btfids: ;" >> Makefile
           echo -e "\nresolve_btfids: ;" >> Makefile
+          # Tambahkan juga di arch/arm64/Makefile (jika ada)
+          echo -e "\nprepare-resolve_btfids: ;" >> arch/arm64/Makefile 2>/dev/null || true
+          echo -e "\nresolve_btfids: ;" >> arch/arm64/Makefile 2>/dev/null || true
 
           # Generate defconfig
           make O=out ARCH=arm64 gki_defconfig
@@ -207,19 +223,34 @@ jobs:
             --enable CONFIG_KSU_SUSFS_OPEN_REDIRECT \
             --enable CONFIG_KSU_SUSFS_SUS_MAP
 
+          # Jalankan olddefconfig
           make O=out ARCH=arm64 olddefconfig
 
-          # Paksa BTF mati (jaga-jaga)
+          # Paksa BTF dan BPF mati di .config (jaga-jaga)
           sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/g' out/.config
           sed -i 's/CONFIG_BPF=y/CONFIG_BPF=n/g' out/.config
+          sed -i 's/CONFIG_BPF_SYSCALL=y/CONFIG_BPF_SYSCALL=n/g' out/.config
+
+          # Jalankan olddefconfig lagi untuk menyesuaikan dependency
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 6. Build Kernel (Image + vmlinux)
+          # Terakhir, paksa kembali karena olddefconfig mungkin mengembalikan beberapa opsi
+          sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/g' out/.config
+          sed -i 's/CONFIG_BPF=y/CONFIG_BPF=n/g' out/.config
+          sed -i 's/CONFIG_BPF_SYSCALL=y/CONFIG_BPF_SYSCALL=n/g' out/.config
+          make O=out ARCH=arm64 olddefconfig
+
+      - name: 6. Build Kernel (Image + vmlinux) dengan SKIP_BTF
         run: |
           echo "=== MULAI BUILD ==="
           cd $GITHUB_WORKSPACE/kernel-source
-          export PATH="/usr/lib/llvm-20/bin:$PATH"
+          CLANG_VER="${{ github.event.inputs.clang_version }}"
+          export PATH="/usr/lib/llvm-${CLANG_VER}/bin:$PATH"
           export SKIP_BTF=1
+
+          # Hapus out/ jika ada sisa, lalu build
+          rm -rf out
+          make O=out ARCH=arm64 olddefconfig
 
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
@@ -240,7 +271,7 @@ jobs:
       - name: 7. Simpan build.log
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ github.event.inputs.variant }}
+          name: build-log-${{ github.event.inputs.variant }}-clang${{ github.event.inputs.clang_version }}
           path: kernel-source/build.log
         if: always()
 
@@ -256,10 +287,10 @@ jobs:
           sed -i 's|is_slot_device=.*|is_slot_device=auto;|g' anykernel.sh
           echo 'partition_list="boot_a boot_b boot dtbo_a dtbo_b";' >> anykernel.sh
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-          zip -r9 ../Panxcz_kernel_susfs_${{ github.event.inputs.variant }}.zip *
+          zip -r9 ../Panxcz_kernel_susfs_${{ github.event.inputs.variant }}_clang${{ github.event.inputs.clang_version }}.zip *
 
       - name: 9. Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Panxcz_kernel_susfs_${{ github.event.inputs.variant }}
-          path: Panxcz_kernel_susfs_${{ github.event.inputs.variant }}.zip
+          name: Panxcz_kernel_susfs_${{ github.event.inputs.variant }}_clang${{ github.event.inputs.clang_version }}
+          path: Panxcz_kernel_susfs_${{ github.event.inputs.variant }}_clang${{ github.event.inputs.clang_version }}.zip
