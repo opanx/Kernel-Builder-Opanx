@@ -161,7 +161,7 @@ jobs:
             --disable CONFIG_KVM \
             --disable CONFIG_ARM64_KVM \
             --disable CONFIG_VIRTUALIZATION \
-            --disable CONFIG_MODULES \
+            --enable CONFIG_MODULES \
             --disable CONFIG_HEADERS_INSTALL \
             --disable CONFIG_DEBUG_INFO \
             --disable CONFIG_KASAN \
@@ -251,6 +251,7 @@ jobs:
           git clone --depth=1 https://github.com/OSM0SIS/AnyKernel3.git AK3
           cp kernel-source/out/arch/arm64/boot/Image AK3/
           cd AK3
+          rm -rf .git*
           sed -i 's|block=.*|block=/dev/block/by-name/boot;|g' anykernel.sh
           sed -i 's|is_slot_device=.*|is_slot_device=auto;|g' anykernel.sh
           echo 'partition_list="boot_a boot_b boot dtbo_a dtbo_b";' >> anykernel.sh
