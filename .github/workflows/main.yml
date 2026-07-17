@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: 1. Persiapan Server & Pemasangan Clang 19
+      - name: 1. Persiapan Server & Pemasangan Clang 22
         run: |
           echo "=== MEMULAI SETUP ENVIRONMENT ==="
           sudo apt-get update
@@ -17,9 +17,9 @@ jobs:
 
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 19 all
+          sudo ./llvm.sh 22 all
 
-          LLVM_BIN_PATH="/usr/lib/llvm-19/bin"
+          LLVM_BIN_PATH="/usr/lib/llvm-22/bin"
           sudo ln -sf "$LLVM_BIN_PATH/clang" /usr/bin/clang
           sudo ln -sf "$LLVM_BIN_PATH/ld.lld" /usr/bin/ld.lld
           sudo ln -sf "$LLVM_BIN_PATH/llvm-objcopy" /usr/bin/llvm-objcopy
@@ -100,7 +100,6 @@ jobs:
           SUBLEVEL=$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')
           echo "Sublevel: 5.10.$SUBLEVEL"
 
-          # Workaround untuk sublevel tertentu
           if [ "$SUBLEVEL" -le "43" ]; then
             perl -i -pe 's/(int|size_t)\s+this_len\s*=\s*min_t\s*\(\s*\1\s*,/size_t this_len = min_t(size_t,/;' fs/proc/base.c
           fi
@@ -110,7 +109,6 @@ jobs:
             perl -i -pe 's/ignored_mask:%x/ignored_mask:0/g' fs/notify/fdinfo.c
           fi
 
-          # Patch utama WAJIB BERHASIL (tanpa || true)
           PATCH_FILE=$(ls 50_*.patch 2>/dev/null | head -n 1)
           if [ -z "$PATCH_FILE" ]; then
             echo "Tidak ada patch SUSFS!" && exit 1
@@ -184,8 +182,9 @@ jobs:
           CONFIG_LZ4_DECOMPRESS=y
           CONFIG_CRYPTO_LZ4=y
           CONFIG_CRYPTO_LZ4HC=y
-          # ===== MATIKAN HEADERS_INSTALL (Biar gak error HDRINST) =====
+          # ===== MATIKAN HEADERS_INSTALL & PAKSA LTO NONE =====
           CONFIG_HEADERS_INSTALL=n
+          CONFIG_LTO_NONE=y
           # ===== OVERHEAD DEBUG DI NONAKTIFKAN =====
           # CONFIG_DEBUG_INFO is not set
           CONFIG_DEBUG_INFO_REDUCED=n
@@ -200,11 +199,11 @@ jobs:
 
           echo 'KBUILD_CFLAGS += -O3 -march=armv8.2-a+crypto' >> Makefile
 
-      - name: 6. Proses Kompilasi Kernel (Clang 19)
+      - name: 6. Proses Kompilasi Kernel (Clang 22)
         run: |
           echo "=== MEMULAI KOMPILASI KERNEL ==="
           cd $GITHUB_WORKSPACE/kernel-source
-          export PATH="/usr/lib/llvm-19/bin:$PATH"
+          export PATH="/usr/lib/llvm-22/bin:$PATH"
 
           # Tambahkan konfigurasi SUSFS
           {
@@ -224,13 +223,13 @@ jobs:
           make O=out ARCH=arm64 gki_defconfig
           make O=out ARCH=arm64 olddefconfig
 
-          # Build Image dan modules saja (hindari headers_install)
+          # Build Image dan modules dengan flag tambahan agar warning tidak jadi error
           make -j$(nproc --all) O=out ARCH=arm64 \
             HOSTCC=gcc HOSTCXX=g++ \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 \
-            KCFLAGS="-Wno-error" \
+            KCFLAGS="-Wno-unknown-warning-option -Wno-error" \
             Image modules
 
       - name: 7. Proses Packing AnyKernel3 (Hard Fix Slot A/B)
